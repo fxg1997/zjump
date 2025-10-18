@@ -1,0 +1,50 @@
+server:
+  api_port: 8080
+  ssh_port: 2222              # SSH Gateway port (for direct SSH login)
+  linux_proxy_port: 8022      # Linux SSH Proxy port
+  windows_proxy_port: 3389    # Windows RDP Proxy port (WIP)
+  backend_url: "http://localhost:8080"  # Backend API address (for proxy registration)
+  mode: debug                 # debug / release
+  proxy_id: "7100b210-5038-437c-afde-6edd9231b49a"  # Optional: Fixed Proxy ID (用于生成独立的SSH主机密钥)
+
+database:
+  host: 127.0.0.1
+  port: 3306
+  user: root
+  password: 123456
+  dbname: zjump
+  max_idle_conns: 10
+  max_open_conns: 100
+  conn_max_lifetime: 3600  # seconds
+
+redis:
+  enabled: false
+  host: localhost
+  port: 6379
+  password: ""
+  db: 0
+
+security:
+  jwt_secret: "your-secret-key-change-in-production"
+  session_timeout: 3600     # seconds
+  encrypt_key: "32-char-encryption-key-here!!"  # AES-256 encryption key (32 bytes)
+
+logging:
+  level: info               # debug / info / warn / error
+  output: both              # console / file / both
+  file: logs/zjump.log      # Log file path
+  max_size: 100             # Max size per file (MB)
+  max_backups: 10           # Number of old log files to keep
+  max_age: 30               # Max days to keep logs
+  compress: true            # Compress old logs
+
+ssh:
+  timeout: 30               # seconds
+  keepalive_interval: 10    # seconds
+  max_sessions: 100
+
+sync:
+  interval: 60              # Sync interval (seconds), default 60s (1 minute)
+  cleanup_days: 7           # Days to keep synced data, default 7 days
+  batch_size: 1000          # Batch size per sync, default 1000
+
