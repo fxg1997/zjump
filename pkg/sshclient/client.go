@@ -92,10 +92,13 @@ func NewSSHClient(cfg SSHConfig) (*SSHClient, error) {
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	fmt.Printf("[SSHClient] Dialing %s with auth methods: %d\n", addr, len(authMethods))
 	client, err := ssh.Dial("tcp", addr, sshConfig)
 	if err != nil {
+		fmt.Printf("[SSHClient] Failed to dial %s: %v\n", addr, err)
 		return nil, fmt.Errorf("failed to dial: %w", err)
 	}
+	fmt.Printf("[SSHClient] Successfully connected to %s\n", addr)
 
 	return &SSHClient{client: client}, nil
 }

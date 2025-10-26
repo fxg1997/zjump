@@ -954,11 +954,15 @@ export default function Assets() {
                   borderRadius: 2,
                 }}
               >
-                <MenuItem value="server">服务器</MenuItem>
+                <MenuItem value="linux">Linux 服务器</MenuItem>
+                <MenuItem value="windows">Windows 服务器</MenuItem>
+                <MenuItem value="vmware">VMware 虚拟机</MenuItem>
+                <MenuItem value="docker">Docker 容器</MenuItem>
                 <MenuItem value="switch">交换机</MenuItem>
                 <MenuItem value="router">路由器</MenuItem>
                 <MenuItem value="firewall">防火墙</MenuItem>
-                <MenuItem value="other">其他</MenuItem>
+                <MenuItem value="storage">存储设备</MenuItem>
+                <MenuItem value="other">其他设备</MenuItem>
               </Select>
             </FormControl>
 
@@ -1149,11 +1153,15 @@ export default function Assets() {
                   borderRadius: 2,
                 }}
               >
-                <MenuItem value="server">服务器</MenuItem>
+                <MenuItem value="linux">Linux 服务器</MenuItem>
+                <MenuItem value="windows">Windows 服务器</MenuItem>
+                <MenuItem value="vmware">VMware 虚拟机</MenuItem>
+                <MenuItem value="docker">Docker 容器</MenuItem>
                 <MenuItem value="switch">交换机</MenuItem>
                 <MenuItem value="router">路由器</MenuItem>
                 <MenuItem value="firewall">防火墙</MenuItem>
-                <MenuItem value="other">其他</MenuItem>
+                <MenuItem value="storage">存储设备</MenuItem>
+                <MenuItem value="other">其他设备</MenuItem>
               </Select>
             </FormControl>
 

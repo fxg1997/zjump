@@ -19,6 +19,7 @@ import {
   VpnKey as VpnKeyIcon,
   Approval as ApprovalIcon,
   MonitorHeart as MonitorHeartIcon,
+  Security as SecurityIcon,
 } from '@mui/icons-material';
 import { showSuccessToast, settingsApi } from '../api';
 import { useSettings } from '../contexts/SettingsContext';
@@ -30,6 +31,7 @@ import AssetSyncSettings from '../components/settings/AssetSyncSettings';
 import AuthSettings from '../components/settings/AuthSettings';
 import ApprovalConfigSettings from '../components/settings/ApprovalConfigSettings';
 import HostMonitorSettings from '../components/settings/HostMonitorSettings';
+import TwoFactorSettings from '../components/settings/TwoFactorSettings';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -328,6 +330,7 @@ export default function Settings() {
           <Tab icon={<StorageIcon />} label={t("settings.auditConfig")} />
           <Tab icon={<NotificationsIcon />} label={t("settings.notificationConfig")} />
           <Tab icon={<VpnKeyIcon />} label={t("settings.authConfig")} />
+          <Tab icon={<SecurityIcon />} label={t("settings.twoFactor.title")} />
           <Tab icon={<ApprovalIcon />} label={t("settings.approvalConfigTab")} />
           <Tab icon={<SyncIcon />} label={t("settings.assetSyncConfig")} />
           <Tab icon={<MonitorHeartIcon />} label={t("settings.hostMonitorConfig")} />
@@ -351,14 +354,18 @@ export default function Settings() {
           </TabPanel>
 
           <TabPanel value={tabValue} index={4}>
-            <ApprovalConfigSettings />
+            <TwoFactorSettings showGlobalConfig={true} />
           </TabPanel>
 
           <TabPanel value={tabValue} index={5}>
-            <AssetSyncSettings />
+            <ApprovalConfigSettings />
           </TabPanel>
 
           <TabPanel value={tabValue} index={6}>
+            <AssetSyncSettings />
+          </TabPanel>
+
+          <TabPanel value={tabValue} index={7}>
             <HostMonitorSettings />
           </TabPanel>
         </Box>

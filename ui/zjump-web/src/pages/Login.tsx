@@ -23,6 +23,7 @@ import { useNavigate } from 'react-router-dom';
 import { authApi } from '../api/api';
 import { useSettings } from '../contexts/SettingsContext';
 import { useTranslation } from 'react-i18next';
+import TwoFactorVerification from '../components/TwoFactorVerification';
 
 type AuthMethod = 'password' | 'ldap' | 'sso';
 
@@ -41,6 +42,12 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [authMethods, setAuthMethods] = useState<AuthMethods | null>(null);
   const [loadingAuthMethods, setLoadingAuthMethods] = useState(true);
+  
+  // 2FA相关状态
+  const [showTwoFactor, setShowTwoFactor] = useState(false);
+  const [twoFactorError, setTwoFactorError] = useState('');
+  const [pendingLoginData, setPendingLoginData] = useState<{username: string, password: string} | null>(null);
+  
   const navigate = useNavigate();
   const { settings } = useSettings();
   const { t } = useTranslation();
@@ -106,6 +113,26 @@ export default function Login() {
 
     try {
       const result = await authApi.login(username, password);
+      
+      // 检查是否需要2FA验证
+      if (result.requiresTwoFactor) {
+        setPendingLoginData({ username, password });
+        setShowTwoFactor(true);
+        setLoading(false);
+        return;
+      }
+      
+      // 检查是否需要设置2FA
+      if (result.needsTwoFactorSetup) {
+        // 用户需要设置2FA，先登录然后跳转到设置页面
+        localStorage.setItem('token', result.token);
+        localStorage.setItem('user', JSON.stringify(result.user));
+        // 跳转到个人设置页面，并显示2FA设置提示
+        navigate('/profile?setup2fa=true');
+        return;
+      }
+      
+      // 正常登录成功
       localStorage.setItem('token', result.token);
       localStorage.setItem('user', JSON.stringify(result.user));
       navigate('/');
@@ -114,6 +141,36 @@ export default function Login() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleTwoFactorVerify = async (code: string, backupCode?: string) => {
+    if (!pendingLoginData) return;
+
+    setTwoFactorError('');
+    setLoading(true);
+
+    try {
+      const result = await authApi.login(
+        pendingLoginData.username, 
+        pendingLoginData.password, 
+        code, 
+        backupCode
+      );
+      
+      localStorage.setItem('token', result.token);
+      localStorage.setItem('user', JSON.stringify(result.user));
+      navigate('/');
+    } catch (err: any) {
+      setTwoFactorError(err.message || t('login.twoFactorFailed'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleTwoFactorCancel = () => {
+    setShowTwoFactor(false);
+    setPendingLoginData(null);
+    setTwoFactorError('');
   };
 
   const handleSSOLogin = async () => {
@@ -180,6 +237,18 @@ export default function Login() {
   }
 
   const authMethodInfo = getAuthMethodInfo(authMethods?.primary || 'password');
+
+  // 如果显示2FA验证，渲染2FA组件
+  if (showTwoFactor) {
+    return (
+      <TwoFactorVerification
+        onVerify={handleTwoFactorVerify}
+        onCancel={handleTwoFactorCancel}
+        loading={loading}
+        error={twoFactorError}
+      />
+    );
+  }
 
   return (
     <Box

@@ -16,6 +16,7 @@ import (
 	"github.com/fisker/zjump-backend/internal/audit"
 	"github.com/fisker/zjump-backend/internal/bastion/blacklist"
 	"github.com/fisker/zjump-backend/internal/bastion/storage"
+	"github.com/fisker/zjump-backend/internal/model"
 	"github.com/fisker/zjump-backend/internal/notification"
 	"github.com/fisker/zjump-backend/internal/repository"
 	connrouter "github.com/fisker/zjump-backend/internal/router"
@@ -28,6 +29,7 @@ import (
 	"github.com/fisker/zjump-backend/pkg/database"
 	"github.com/fisker/zjump-backend/pkg/logger"
 	pkgredis "github.com/fisker/zjump-backend/pkg/redis"
+	"gorm.io/gorm"
 
 	_ "github.com/fisker/zjump-backend/docs" // swagger docs
 )
@@ -130,13 +132,14 @@ func main() {
 	hostGroupRepo := repository.NewHostGroupRepository(database.DB)
 	hostGroupHandler := handler.NewHostGroupHandler(hostGroupRepo, hostRepo, userRepo)
 
-	// Initialize Approval Factory and Providers (Third-party only)
+	// Initialize Approval Factory and Providers
 	approvalFactory := approval.NewFactory()
-	// Note: External providers (Feishu, Dingtalk) should be initialized with config
-	// approvalFactory.Register(model.ApprovalPlatformFeishu, approval.NewFeishuProvider(appID, appSecret, approvalCode))
-	// approvalFactory.Register(model.ApprovalPlatformDingtalk, approval.NewDingtalkProvider(appKey, appSecret, processCode))
+
+	// Load approval configurations from database and register providers
+	loadApprovalProviders(database.DB, approvalFactory)
 
 	approvalHandler := handler.NewApprovalHandler(database.DB, approvalFactory)
+	approvalCallbackHandler := handler.NewApprovalCallbackHandler(database.DB)
 	fileHandler := handler.NewFileHandler(database.DB, hostRepo)
 
 	// Initialize Asset Sync
@@ -165,6 +168,9 @@ func main() {
 	systemUserHandler := handler.NewSystemUserHandler(systemUserRepo)
 	userGroupHandler := handler.NewUserGroupHandler(userGroupRepo)
 	permissionRuleHandler := handler.NewPermissionRuleHandler(permissionRuleRepo)
+
+	// Initialize 2FA handler
+	twoFactorHandler := handler.NewTwoFactorHandler(database.DB, authService.TwoFactorSvc)
 
 	// Start proxy monitor
 	proxyMonitor := service.NewProxyMonitor(database.DB, service.MonitorConfig{
@@ -229,9 +235,10 @@ func main() {
 			EnablePublicKey:  true,        // 启用公钥认证
 			DB:               database.DB, // 数据库连接
 			UseSharedHostKey: true,        // 启用数据库共享密钥（多实例部署推荐）
+			BannerMessage:    "Welcome to ZJump SSH Gateway\r\n",
 		}
 
-		var err error
+		// 创建标准SSH服务器
 		sshServer, err = server.NewServer(sshConfig, sshAuthenticator, terminalHandler)
 		if err != nil {
 			logger.Infof("Warning: Failed to create SSH server: %v", err)
@@ -255,7 +262,7 @@ func main() {
 		}
 	}
 
-	r := router.Setup(hostHandler, dashboardHandler, sessionHandler, proxyHandler, authHandler, blacklistHandler, settingHandler, routingHandler, connectionHandler, hostGroupHandler, approvalHandler, fileHandler, assetSyncHandler, authService, hostMonitorHandler, systemUserHandler, userGroupHandler, permissionRuleHandler)
+	r := router.Setup(hostHandler, dashboardHandler, sessionHandler, proxyHandler, authHandler, blacklistHandler, settingHandler, routingHandler, connectionHandler, hostGroupHandler, approvalHandler, approvalCallbackHandler, fileHandler, assetSyncHandler, authService, hostMonitorHandler, systemUserHandler, userGroupHandler, permissionRuleHandler, twoFactorHandler)
 
 	// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 	// Initialize and Start Expiration Service
@@ -378,4 +385,50 @@ func getMaxSessions(cfg *config.Config) int {
 		return cfg.SSH.MaxSessions
 	}
 	return 100
+}
+
+// loadApprovalProviders loads approval configurations from database and registers providers
+func loadApprovalProviders(db *gorm.DB, factory *approval.Factory) {
+	var configs []model.ApprovalConfig
+	if err := db.Where("enabled = ?", true).Find(&configs).Error; err != nil {
+		logger.Warnf("Failed to load approval configurations: %v", err)
+		return
+	}
+
+	logger.Infof("Found %d enabled approval configurations", len(configs))
+
+	for _, config := range configs {
+		logger.Infof("Processing config: %s (type: %s, app_id: %s, approval_code: %s)",
+			config.Name, config.Type, config.AppID, config.ApprovalCode)
+
+		switch config.Type {
+		case "feishu":
+			if config.AppID != "" && config.AppSecret != "" && config.ApprovalCode != "" {
+				provider := approval.NewFeishuProvider(&config, database.DB)
+				factory.Register(model.ApprovalPlatformFeishu, provider)
+				logger.Infof("Registered Feishu approval provider: %s", config.Name)
+			} else {
+				logger.Warnf("Feishu config incomplete: app_id=%s, app_secret=%s, approval_code=%s",
+					config.AppID, config.AppSecret, config.ApprovalCode)
+			}
+		case "dingtalk":
+			if config.AppID != "" && config.AppSecret != "" && config.ProcessCode != "" {
+				provider := approval.NewDingTalkProvider(&config, database.DB)
+				factory.Register(model.ApprovalPlatformDingTalk, provider)
+				logger.Infof("Registered DingTalk approval provider: %s", config.Name)
+			} else {
+				logger.Warnf("DingTalk config incomplete: app_id=%s, app_secret=%s, process_code=%s",
+					config.AppID, config.AppSecret, config.ProcessCode)
+			}
+		case "wechat":
+			if config.AppID != "" && config.AppSecret != "" && config.TemplateID != "" {
+				provider := approval.NewWeChatProvider(&config, database.DB)
+				factory.Register(model.ApprovalPlatformWeChat, provider)
+				logger.Infof("Registered WeChat approval provider: %s", config.Name)
+			} else {
+				logger.Warnf("WeChat config incomplete: app_id=%s, app_secret=%s, template_id=%s",
+					config.AppID, config.AppSecret, config.TemplateID)
+			}
+		}
+	}
 }

@@ -40,11 +40,15 @@ func (h *ApprovalHandler) ListApprovals(c *gin.Context) {
 
 	// 根据角色过滤
 	if role == "my" && userID != "" {
+		// 我的申请：显示所有状态的工单（包括已结束的）
 		query = query.Where("applicant_id = ?", userID)
 	} else if role == "approve" && userID != "" {
 		// 查询待当前用户审批的工单 (MySQL兼容方式)
 		// approver_ids 存储为 JSON 数组格式，如: ["id1","id2"]
 		query = query.Where("status = ? AND JSON_CONTAINS(approver_ids, ?)", model.ApprovalStatusPending, fmt.Sprintf(`"%s"`, userID))
+	} else if role == "all" && userID != "" {
+		// 全部工单：显示所有与我相关的工单（申请人或审批人）
+		query = query.Where("applicant_id = ? OR JSON_CONTAINS(approver_ids, ?)", userID, fmt.Sprintf(`"%s"`, userID))
 	}
 
 	if status != "" {
@@ -139,19 +143,47 @@ func (h *ApprovalHandler) CreateApproval(c *gin.Context) {
 	req.UpdatedAt = now
 	req.Status = model.ApprovalStatusPending
 
-	// 验证必须使用第三方审批平台
+	// 如果没有指定平台，使用内部审批系统
 	if req.Platform == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "必须选择第三方审批平台（飞书、钉钉、企业微信等）",
-		})
-		return
+		req.Platform = model.ApprovalPlatformInternal
 	}
 
 	// 计算过期时间
 	if req.Duration > 0 {
 		expiresAt := now.Add(time.Duration(req.Duration) * time.Hour)
 		req.ExpiresAt = &expiresAt
+	}
+
+	// 处理内部审批系统
+	if req.Platform == model.ApprovalPlatformInternal {
+		// 从工单配置中读取审批人信息（内部审批系统也需要审批人）
+		var config model.ApprovalConfig
+		if err := h.db.Where("type = ? AND enabled = ?", string(req.Platform), true).First(&config).Error; err == nil {
+			// 解析审批人ID列表
+			if config.ApproverUserIDs != "" {
+				var approverIDs []string
+				if err := json.Unmarshal([]byte(config.ApproverUserIDs), &approverIDs); err == nil {
+					req.ApproverIDs = approverIDs
+				}
+			}
+		}
+
+		// 内部审批系统：直接保存到数据库，无需第三方平台
+		if err := h.db.Create(&req).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"code":    500,
+				"message": "创建审批申请失败",
+				"error":   err.Error(),
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"code":    0,
+			"message": "审批申请创建成功",
+			"data":    req,
+		})
+		return
 	}
 
 	// 创建第三方审批单
@@ -162,7 +194,7 @@ func (h *ApprovalHandler) CreateApproval(c *gin.Context) {
 		switch req.Platform {
 		case model.ApprovalPlatformFeishu:
 			platformName = "飞书"
-		case model.ApprovalPlatformDingtalk:
+		case model.ApprovalPlatformDingTalk:
 			platformName = "钉钉"
 		case model.ApprovalPlatformWeChat:
 			platformName = "企业微信"
@@ -192,12 +224,20 @@ func (h *ApprovalHandler) CreateApproval(c *gin.Context) {
 	}
 
 	req.ExternalID = externalID
-	// 构建外部链接
-	switch req.Platform {
-	case model.ApprovalPlatformFeishu:
-		req.ExternalURL = fmt.Sprintf("https://www.feishu.cn/approval/instance/%s", externalID)
-	case model.ApprovalPlatformDingtalk:
-		req.ExternalURL = fmt.Sprintf("https://aflow.dingtalk.com/dingtalk/mobile/homepage.htm?corpid=&lwp_as=1&procInstId=%s", externalID)
+
+	// 使用默认的外部链接模板
+	req.ExternalURL = h.getDefaultExternalURL(req.Platform, externalID)
+
+	// 从工单配置中读取审批人信息
+	var config model.ApprovalConfig
+	if err := h.db.Where("type = ? AND enabled = ?", string(req.Platform), true).First(&config).Error; err == nil {
+		// 解析审批人ID列表
+		if config.ApproverUserIDs != "" {
+			var approverIDs []string
+			if err := json.Unmarshal([]byte(config.ApproverUserIDs), &approverIDs); err == nil {
+				req.ApproverIDs = approverIDs
+			}
+		}
 	}
 
 	// 保存到数据库
@@ -616,10 +656,10 @@ func (h *ApprovalHandler) GetApprovalStats(c *gin.Context) {
 	// 我的申请统计
 	if userID != "" {
 		var myStats struct {
-			Total    int64
-			Pending  int64
-			Approved int64
-			Rejected int64
+			Total    int64 `json:"total"`
+			Pending  int64 `json:"pending"`
+			Approved int64 `json:"approved"`
+			Rejected int64 `json:"rejected"`
 		}
 
 		h.db.Model(&model.Approval{}).Where("applicant_id = ?", userID).Count(&myStats.Total)
@@ -637,10 +677,10 @@ func (h *ApprovalHandler) GetApprovalStats(c *gin.Context) {
 
 	// 全局统计（管理员）
 	var globalStats struct {
-		Total    int64
-		Pending  int64
-		Approved int64
-		Rejected int64
+		Total    int64 `json:"total"`
+		Pending  int64 `json:"pending"`
+		Approved int64 `json:"approved"`
+		Rejected int64 `json:"rejected"`
 	}
 
 	h.db.Model(&model.Approval{}).Count(&globalStats.Total)
@@ -811,9 +851,21 @@ func (h *ApprovalHandler) UpdateApprovalConfig(c *gin.Context) {
 		}
 	} else {
 		// 更新配置
+		// 先查询现有记录，保留原有的 CreatedAt 值
+		var existingConfig model.ApprovalConfig
+		if err := h.db.Where("id = ?", id).First(&existingConfig).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{
+				"code":    404,
+				"message": "配置不存在",
+			})
+			return
+		}
+
+		// 保留原有的 CreatedAt 值
+		req.CreatedAt = existingConfig.CreatedAt
 		req.UpdatedAt = time.Now()
-		// 使用 Save 而不是 Updates，以确保所有字段都被更新（包括零值字段）
 		req.ID = id
+
 		if err := h.db.Save(&req).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"code":    500,
@@ -875,4 +927,18 @@ func (h *ApprovalHandler) DeleteApprovalConfig(c *gin.Context) {
 		"code":    0,
 		"message": "删除成功",
 	})
+}
+
+// getDefaultExternalURL 获取默认的外部链接URL
+func (h *ApprovalHandler) getDefaultExternalURL(platform model.ApprovalPlatform, externalID string) string {
+	switch platform {
+	case model.ApprovalPlatformFeishu:
+		return fmt.Sprintf("https://www.feishu.cn/approval/instance/%s", externalID)
+	case model.ApprovalPlatformDingTalk:
+		return fmt.Sprintf("https://aflow.dingtalk.com/dingtalk/mobile/homepage.htm?corpid=&lwp_as=1&procInstId=%s", externalID)
+	case model.ApprovalPlatformWeChat:
+		return fmt.Sprintf("https://work.weixin.qq.com/wework_admin/frame#/approval/detail/%s", externalID)
+	default:
+		return ""
+	}
 }

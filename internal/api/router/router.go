@@ -22,6 +22,7 @@ func Setup(
 	connectionHandler *handler.ConnectionHandler,
 	hostGroupHandler *handler.HostGroupHandler,
 	approvalHandler *handler.ApprovalHandler,
+	approvalCallbackHandler *handler.ApprovalCallbackHandler,
 	fileHandler *handler.FileHandler,
 	assetSyncHandler *handler.AssetSyncHandler,
 	authService *service.AuthService,
@@ -29,6 +30,7 @@ func Setup(
 	systemUserHandler *handler.SystemUserHandler,
 	userGroupHandler *handler.UserGroupHandler,
 	permissionRuleHandler *handler.PermissionRuleHandler,
+	twoFactorHandler *handler.TwoFactorHandler,
 ) *gin.Engine {
 	r := gin.Default()
 
@@ -91,6 +93,18 @@ func Setup(
 
 		// 用户列表（用于黑名单选择用户）
 		authenticated.GET("/users", authHandler.GetUsers)
+
+		// 2FA相关
+		twoFactor := authenticated.Group("/two-factor")
+		{
+			twoFactor.GET("/status", twoFactorHandler.GetUserStatus)
+			twoFactor.POST("/setup", twoFactorHandler.SetupTwoFactor)
+			twoFactor.POST("/verify", twoFactorHandler.VerifyTwoFactor)
+			twoFactor.POST("/disable", twoFactorHandler.DisableTwoFactor)
+			twoFactor.POST("/verify-code", twoFactorHandler.VerifyCode)
+			twoFactor.GET("/backup-codes", twoFactorHandler.GetBackupCodes)
+			twoFactor.POST("/regenerate-backup-codes", twoFactorHandler.RegenerateBackupCodes)
+		}
 
 		// Dashboard
 		dashboard := authenticated.Group("/dashboard")
@@ -230,6 +244,15 @@ func Setup(
 			settings.POST("/test-wechat", settingHandler.TestWechatNotification)     // 测试企业微信通知
 		}
 
+		// 2FA全局配置（仅管理员）
+		adminTwoFactor := authenticated.Group("/admin/two-factor")
+		adminTwoFactor.Use(middleware.AdminMiddleware())
+		{
+			adminTwoFactor.GET("/config", twoFactorHandler.GetGlobalConfig)
+			adminTwoFactor.PUT("/config", twoFactorHandler.UpdateGlobalConfig)
+			adminTwoFactor.POST("/reset/:userId", twoFactorHandler.ResetUserTwoFactor) // 重置用户2FA
+		}
+
 		// 路由决策（基于标签）
 		routing := authenticated.Group("/routing")
 		{
@@ -333,7 +356,9 @@ func Setup(
 	// authenticated路由组结束
 
 	// 第三方审批平台回调（不需要认证）
-	api.POST("/approvals/callback/:platform", approvalHandler.HandleCallback)
+	api.POST("/approvals/callback/feishu", approvalCallbackHandler.HandleFeishuCallback)
+	api.POST("/approvals/callback/dingtalk", approvalCallbackHandler.HandleDingTalkCallback)
+	api.POST("/approvals/callback/wechat", approvalCallbackHandler.HandleWeChatCallback)
 
 	// Prometheus Metrics
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))

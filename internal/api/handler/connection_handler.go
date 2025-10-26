@@ -82,6 +82,8 @@ func (h *ConnectionHandler) HandleConnection(c *gin.Context) {
 	token := c.Query("token")
 	systemUserID := c.Query("systemUserId") // 系统用户ID（可选）
 
+	log.Printf("[Connection] WebSocket connection request: hostID=%s, systemUserID=%s", hostID, systemUserID)
+
 	if hostID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing hostId parameter"})
 		return
@@ -444,8 +446,8 @@ func (h *ConnectionHandler) handleProxyConnection(ws *websocket.Conn, hostID str
 
 // proxySSHConnectionWithTimeout 代理 SSH 连接（带超时倒计时）
 func (h *ConnectionHandler) proxySSHConnectionWithTimeout(ws *websocket.Conn, host *model.Host, systemUser *model.SystemUser, sessionID string, rec *recorder.Recorder, cmdParser *parser.CommandExtractor, userInfo *UserInfo, connectionSuccess *bool, startTime time.Time) error {
-	// 创建超时上下文（改为10秒）
-	timeout := 10 * time.Second
+	// 创建超时上下文（改为30秒）
+	timeout := 30 * time.Second
 	deadline := time.Now().Add(timeout)
 
 	// 创建用于取消倒计时的通道
@@ -485,6 +487,7 @@ func (h *ConnectionHandler) proxySSHConnectionWithTimeout(ws *websocket.Conn, ho
 	}()
 
 	// 执行实际的SSH连接，传递stopCountdown通道、connectionSuccess指针和startTime
+	log.Printf("[Connection] Starting SSH connection with timeout: %v", timeout)
 	return h.proxySSHConnection(ws, host, systemUser, sessionID, rec, cmdParser, userInfo, stopCountdown, connectionSuccess, startTime)
 }
 
@@ -514,8 +517,12 @@ func (h *ConnectionHandler) proxySSHConnection(ws *websocket.Conn, host *model.H
 		PrivateKey: privateKey,
 		Passphrase: passphrase,
 		AuthType:   authType,
-		Timeout:    10 * time.Second,
+		Timeout:    30 * time.Second,
 	}
+
+	log.Printf("[Connection] SSH Config: Host=%s, Port=%d, Username=%s, AuthType=%s, Timeout=%v",
+		cfg.Host, cfg.Port, cfg.Username, cfg.AuthType, cfg.Timeout)
+	log.Printf("[Connection] Attempting SSH connection to %s:%d as %s", host.IP, host.Port, username)
 
 	client, err := sshclient.NewSSHClient(cfg)
 	if err != nil {

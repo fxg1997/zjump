@@ -42,7 +42,7 @@ import {
   Cancel as CancelIcon,
 } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
-import { approvalApi } from '../../api/api';
+import { approvalApi, ApprovalConfig } from '../../api/api';
 
 interface ApprovalPlatformConfig {
   id?: string;
@@ -66,6 +66,19 @@ interface ApprovalPlatformConfig {
   // 表单字段映射 (JSON string)
   form_fields: string;
   
+  // 审批人配置
+  approver_user_ids?: string;
+  
+  // 抄送人配置
+  cc_user_ids?: string;
+  cc_open_ids?: string;
+  
+  // API配置
+  api_base_url?: string;
+  
+  // 回调配置
+  callback_url?: string;
+  
   created_at?: string;
   updated_at?: string;
 }
@@ -73,34 +86,80 @@ interface ApprovalPlatformConfig {
 const defaultFormFields = {
   feishu: `[
   {
-    "id": "widget_title",
+    "id": "widget17424405077590001",
+    "name": "工单标题",
     "type": "input",
-    "label": "工单标题",
-    "field": "title"
+    "required": false,
+    "visible": true,
+    "printable": true,
+    "enable_default_value": false,
+    "default_value_type": "",
+    "widget_default_value": "",
+    "display_condition": null
   },
   {
-    "id": "widget_description",
+    "id": "widget17611283640360001",
+    "name": "详细描述",
     "type": "textarea",
-    "label": "详细描述",
-    "field": "description"
+    "required": false,
+    "visible": true,
+    "printable": true,
+    "enable_default_value": false,
+    "default_value_type": "",
+    "widget_default_value": "",
+    "display_condition": null
   },
   {
-    "id": "widget_reason",
+    "id": "widget17611425102270001",
+    "name": "申请类型",
+    "type": "radioV2",
+    "required": false,
+    "visible": true,
+    "printable": true,
+    "enable_default_value": false,
+    "default_value_type": "",
+    "widget_default_value": "",
+    "display_condition": null,
+    "option": [
+      {"value": "mh22s1w3-nkqsak2eis-0", "text": "host_access"},
+      {"value": "mh22s1w3-dipw4j04vb-0", "text": "host_group_access"}
+    ]
+  },
+  {
+    "id": "widget17611283900470001",
+    "name": "申请理由",
     "type": "textarea",
-    "label": "申请理由",
-    "field": "reason"
+    "required": false,
+    "visible": true,
+    "printable": true,
+    "enable_default_value": false,
+    "default_value_type": "",
+    "widget_default_value": "",
+    "display_condition": null
   },
   {
-    "id": "widget_resources",
+    "id": "widget17611284241860001",
+    "name": "申请资源",
     "type": "textarea",
-    "label": "申请资源",
-    "field": "resources"
+    "required": false,
+    "visible": true,
+    "printable": true,
+    "enable_default_value": false,
+    "default_value_type": "",
+    "widget_default_value": "",
+    "display_condition": null
   },
   {
-    "id": "widget_duration",
+    "id": "widget17611477809060001",
+    "name": "权限时长",
     "type": "input",
-    "label": "权限时长(小时)",
-    "field": "duration"
+    "required": false,
+    "visible": true,
+    "printable": true,
+    "enable_default_value": false,
+    "default_value_type": "",
+    "widget_default_value": "",
+    "display_condition": null
   }
 ]`,
   dingtalk: `[
@@ -115,9 +174,23 @@ const defaultFormFields = {
     "field": "description"
   },
   {
+    "name": "type",
+    "label": "申请类型",
+    "field": "type",
+    "options": [
+      {"value": "host_access", "label": "主机访问权限"},
+      {"value": "host_group_access", "label": "主机组访问权限"}
+    ]
+  },
+  {
     "name": "reason",
     "label": "申请理由",
     "field": "reason"
+  },
+  {
+    "name": "duration",
+    "label": "权限时长",
+    "field": "duration"
   }
 ]`,
   wechat: `[
@@ -134,10 +207,26 @@ const defaultFormFields = {
     "field": "description"
   },
   {
+    "control": "Select",
+    "id": "Select-type",
+    "label": "申请类型",
+    "field": "type",
+    "options": [
+      {"value": "host_access", "label": "主机访问权限"},
+      {"value": "host_group_access", "label": "主机组访问权限"}
+    ]
+  },
+  {
     "control": "Textarea",
     "id": "Textarea-reason",
     "label": "申请理由",
     "field": "reason"
+  },
+  {
+    "control": "Text",
+    "id": "Text-duration",
+    "label": "权限时长",
+    "field": "duration"
   }
 ]`,
 };
@@ -158,6 +247,15 @@ export default function ApprovalConfigSettings() {
     process_code: '',
     template_id: '',
     form_fields: defaultFormFields.feishu,
+    // 审批人配置
+    approver_user_ids: '',
+    // 抄送人配置
+    cc_user_ids: '',
+    cc_open_ids: '',
+    // API配置
+    api_base_url: '',
+    // 回调配置
+    callback_url: '',
   });
 
   // 加载配置列表
@@ -193,6 +291,15 @@ export default function ApprovalConfigSettings() {
         process_code: config.process_code || '',
         template_id: config.template_id || '',
         form_fields: config.form_fields || defaultFormFields[config.type || 'feishu'],
+        // 审批人配置
+        approver_user_ids: config.approver_user_ids || '',
+        // 抄送人配置
+        cc_user_ids: config.cc_user_ids || '',
+        cc_open_ids: config.cc_open_ids || '',
+        // API配置
+        api_base_url: config.api_base_url || '',
+        // 回调配置
+        callback_url: config.callback_url || '',
       });
     } else {
       setEditingConfig(null);
@@ -206,6 +313,15 @@ export default function ApprovalConfigSettings() {
         process_code: '',
         template_id: '',
         form_fields: defaultFormFields.feishu,
+        // 审批人配置
+        approver_user_ids: '',
+        // 抄送人配置
+        cc_user_ids: '',
+        cc_open_ids: '',
+        // API配置
+        api_base_url: '',
+        // 回调配置
+        callback_url: '',
       });
     }
     setDialogOpen(true);
@@ -228,13 +344,31 @@ export default function ApprovalConfigSettings() {
         return;
       }
 
+      // 转换数据格式以匹配后端API
+      const apiData: Partial<ApprovalConfig> = {
+        name: formData.name,
+        type: formData.type as string,
+        enabled: formData.enabled,
+        app_id: formData.app_id,
+        app_secret: formData.app_secret,
+        approval_code: formData.approval_code,
+        process_code: formData.process_code,
+        template_id: formData.template_id,
+        form_fields: formData.form_fields,
+        approver_user_ids: formData.approver_user_ids,
+        cc_user_ids: formData.cc_user_ids,
+        cc_open_ids: formData.cc_open_ids,
+        api_base_url: formData.api_base_url,
+        callback_url: formData.callback_url,
+      };
+
       if (editingConfig) {
         // 更新
-        await approvalApi.updateApprovalConfig(editingConfig.id!, formData);
+        await approvalApi.updateApprovalConfig(editingConfig.id!, apiData);
         alert(t('settings.approvalConfig.messages.updateSuccess'));
       } else {
         // 创建
-        await approvalApi.updateApprovalConfig(null, formData);
+        await approvalApi.updateApprovalConfig(null, apiData);
         alert(t('settings.approvalConfig.messages.createSuccess'));
       }
       handleCloseDialog();
@@ -326,6 +460,7 @@ export default function ApprovalConfigSettings() {
           • <strong>{t('settings.approvalConfig.platforms.wechat')}</strong>: {t('settings.approvalConfig.tips.wechat')}
         </Typography>
       </Alert>
+
 
       {configs.length === 0 ? (
         <Alert severity="info">
@@ -472,7 +607,7 @@ export default function ApprovalConfigSettings() {
               onChange={(e) => setFormData({ ...formData, app_secret: e.target.value })}
               required
               helperText={editingConfig ? t('settings.approvalConfig.appSecretHelperEdit') : t('settings.approvalConfig.appSecretHelper')}
-              placeholder={editingConfig ? '如不修改，请保持原值' : ''}
+              placeholder={editingConfig ? t('settings.approvalConfig.appSecretPlaceholder') : ''}
             />
 
             {/* 平台特定配置 */}
@@ -510,6 +645,87 @@ export default function ApprovalConfigSettings() {
             )}
 
             <Divider />
+
+            {/* 外部链接配置 */}
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="subtitle1" fontWeight="600">
+                  {t('settings.approvalConfig.apiConfig.title')}
+                </Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Stack spacing={2}>
+                  <TextField
+                    fullWidth
+                    label={t('settings.approvalConfig.apiConfig.apiBaseUrl')}
+                    value={formData.api_base_url || ''}
+                    onChange={(e) => setFormData({ ...formData, api_base_url: e.target.value })}
+                    helperText={t('settings.approvalConfig.apiConfig.apiBaseUrlHelper')}
+                    placeholder="https://open.larksuite.com/open-apis"
+                  />
+                  <Box>
+                    <TextField
+                      fullWidth
+                      label={t('settings.approvalConfig.apiConfig.callbackUrl')}
+                      value={formData.callback_url || ''}
+                      onChange={(e) => setFormData({ ...formData, callback_url: e.target.value })}
+                      helperText={t('settings.approvalConfig.apiConfig.callbackUrlHelper')}
+                      placeholder="https://your-domain.com/api/approvals/callback/feishu"
+                    />
+                    <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => {
+                          const baseUrl = window.location.origin;
+                          const callbackPath = `/api/approvals/callback/${formData.type}`;
+                          setFormData({ ...formData, callback_url: baseUrl + callbackPath });
+                        }}
+                      >
+                        {t('settings.approvalConfig.apiConfig.autoGenerateCallbackUrl')}
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="info"
+                        onClick={() => {
+                          if (formData.callback_url) {
+                            navigator.clipboard.writeText(formData.callback_url);
+                            alert(t('settings.approvalConfig.apiConfig.callbackUrlCopied'));
+                          }
+                        }}
+                        disabled={!formData.callback_url}
+                      >
+                        {t('settings.approvalConfig.apiConfig.copyCallbackUrl')}
+                      </Button>
+                    </Box>
+                  </Box>
+                </Stack>
+              </AccordionDetails>
+            </Accordion>
+
+            {/* 审批人配置 */}
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="subtitle1" fontWeight="600">
+                  {t('settings.approvalConfig.approverConfig.title')}
+                </Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Stack spacing={2}>
+                  <TextField
+                    fullWidth
+                    label={t('settings.approvalConfig.approverConfig.approverUserIds')}
+                    value={formData.approver_user_ids || ''}
+                    onChange={(e) => setFormData({ ...formData, approver_user_ids: e.target.value })}
+                    helperText={t('settings.approvalConfig.approverConfig.approverUserIdsHelper')}
+                    placeholder='["user1", "user2", "user3"]'
+                    multiline
+                    rows={3}
+                  />
+                </Stack>
+              </AccordionDetails>
+            </Accordion>
 
             {/* 表单字段映射 */}
             <Accordion defaultExpanded>

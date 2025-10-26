@@ -19,6 +19,7 @@ type authAttempt struct {
 	timestamp       time.Time
 	rejected        bool // 是否因为 authMethod 不匹配而被拒绝
 	shouldTerminate bool // 是否应该立即终止连接（用于公钥认证失败的情况）
+	failed          bool // 是否为认证失败（密码错误等）
 }
 
 // ServiceAuthenticator 基于现有AuthService的认证器
@@ -63,11 +64,11 @@ func (a *ServiceAuthenticator) cleanupExpiredAttempts() {
 
 // recordAttempt 记录认证尝试
 func (a *ServiceAuthenticator) recordAttempt(clientIP, method string, rejected bool) {
-	a.recordAttemptWithTerminate(clientIP, method, rejected, false)
+	a.recordAttemptWithTerminate(clientIP, method, rejected, false, false)
 }
 
 // recordAttemptWithTerminate 记录认证尝试（带终止标志）
-func (a *ServiceAuthenticator) recordAttemptWithTerminate(clientIP, method string, rejected, shouldTerminate bool) {
+func (a *ServiceAuthenticator) recordAttemptWithTerminate(clientIP, method string, rejected, shouldTerminate, failed bool) {
 	a.attemptsMu.Lock()
 	defer a.attemptsMu.Unlock()
 
@@ -76,6 +77,7 @@ func (a *ServiceAuthenticator) recordAttemptWithTerminate(clientIP, method strin
 		timestamp:       time.Now(),
 		rejected:        rejected,
 		shouldTerminate: shouldTerminate,
+		failed:          failed,
 	})
 }
 
@@ -119,6 +121,27 @@ func (a *ServiceAuthenticator) ShouldTerminateConnection(clientIP string) bool {
 	return false
 }
 
+// HasExceededMaxAttempts 检查是否超过最大尝试次数
+func (a *ServiceAuthenticator) HasExceededMaxAttempts(clientIP string, maxAttempts int) bool {
+	a.attemptsMu.RLock()
+	defer a.attemptsMu.RUnlock()
+
+	attempts, exists := a.attempts[clientIP]
+	if !exists {
+		return false
+	}
+
+	// 统计最近的失败尝试次数（包括认证失败和认证方式不匹配）
+	failedCount := 0
+	for _, attempt := range attempts {
+		if attempt.failed || attempt.rejected {
+			failedCount++
+		}
+	}
+
+	return failedCount >= maxAttempts
+}
+
 // clearAttempts 清除指定连接的认证记录（认证成功后调用）
 func (a *ServiceAuthenticator) clearAttempts(clientIP string) {
 	a.attemptsMu.Lock()
@@ -126,11 +149,22 @@ func (a *ServiceAuthenticator) clearAttempts(clientIP string) {
 	delete(a.attempts, clientIP)
 }
 
+// GetAuthService 获取认证服务（用于SSH服务器）
+func (a *ServiceAuthenticator) GetAuthService() *service.AuthService {
+	return a.authService
+}
+
 // AuthenticatePassword 密码认证
 func (a *ServiceAuthenticator) AuthenticatePassword(username, password string, clientIP string) (*types.AuthResult, error) {
 	log.Printf("[SSH Auth] Attempting password authentication for user: %s from IP: %s", username, clientIP)
 
-	// 首先检查是否应该立即终止（之前的公钥认证失败）
+	// 首先检查是否超过最大尝试次数
+	if a.HasExceededMaxAttempts(clientIP, 3) {
+		log.Printf("[SSH Auth] Password authentication BLOCKED - too many failed attempts from IP: %s", clientIP)
+		return nil, fmt.Errorf("too many authentication failures")
+	}
+
+	// 检查是否应该立即终止（之前的公钥认证失败）
 	if a.ShouldTerminateConnection(clientIP) {
 		log.Printf("[SSH Auth] Password authentication BLOCKED - previous publickey authentication failed")
 		// 不进行任何验证，直接返回错误，让连接快速失败
@@ -141,8 +175,8 @@ func (a *ServiceAuthenticator) AuthenticatePassword(username, password string, c
 	user, err := a.authService.GetUserByUsername(username)
 	if err != nil {
 		log.Printf("[SSH Auth] User not found: %s", username)
-		// 记录失败尝试
-		a.recordAttempt(clientIP, "password", true)
+		// 记录失败尝试（用户不存在）
+		a.recordAttemptWithTerminate(clientIP, "password", true, false, true)
 		// 直接返回error，立即断开连接
 		return nil, fmt.Errorf("user not found")
 	}
@@ -153,7 +187,7 @@ func (a *ServiceAuthenticator) AuthenticatePassword(username, password string, c
 			username, user.AuthMethod)
 		log.Printf("[SSH Auth] User only supports publickey authentication - password is disabled")
 		// 记录被拒绝的尝试，并标记需要终止连接
-		a.recordAttemptWithTerminate(clientIP, "password", true, true)
+		a.recordAttemptWithTerminate(clientIP, "password", true, true, true)
 		// 返回一个强制断开连接的错误
 		return nil, fmt.Errorf("authentication method not allowed")
 	}
@@ -179,10 +213,25 @@ func (a *ServiceAuthenticator) AuthenticatePassword(username, password string, c
 	loginResp, err := a.authService.Login(loginReq, clientIP, "SSH-Client")
 	if err != nil {
 		log.Printf("[SSH Auth] Password verification failed for user %s: %v", username, err)
-		// 记录失败尝试（但不标记为 rejected，因为认证方式是正确的，只是密码错误）
-		a.recordAttempt(clientIP, "password", false)
+		// 记录失败尝试（密码错误）
+		a.recordAttemptWithTerminate(clientIP, "password", false, false, true)
 		// 直接返回error，不允许客户端尝试其他认证方法（比如公钥）
 		return nil, fmt.Errorf("password verification failed: invalid password")
+	}
+
+	// 调试：检查MFA状态
+	log.Printf("[SSH Auth] Login response: RequiresTwoFactor=%v, TwoFactorEnabled=%v", loginResp.RequiresTwoFactor, loginResp.TwoFactorEnabled)
+
+	// 检查是否需要MFA验证
+	if loginResp.RequiresTwoFactor {
+		log.Printf("[SSH Auth] User %s requires 2FA verification (enabled: %v)", username, loginResp.TwoFactorEnabled)
+		// 密码认证成功但需要MFA，返回特殊结果让Keyboard Interactive处理
+		return &types.AuthResult{
+			Success:           true,
+			UserID:            loginResp.User.ID,
+			Message:           "Password authentication successful, MFA required",
+			RequiresTwoFactor: true,
+		}, nil
 	}
 
 	log.Printf("[SSH Auth] Password authentication SUCCESSFUL for user: %s (ID: %s, AuthMethod: %s)",
@@ -203,12 +252,18 @@ func (a *ServiceAuthenticator) AuthenticatePublicKey(username string, key ssh.Pu
 	log.Printf("[SSH Auth] Attempting public key authentication for user: %s from IP: %s", username, clientIP)
 	log.Printf("[SSH Auth] Client key fingerprint: %s", ssh.FingerprintSHA256(key))
 
+	// 首先检查是否超过最大尝试次数
+	if a.HasExceededMaxAttempts(clientIP, 3) {
+		log.Printf("[SSH Auth] Public key authentication BLOCKED - too many failed attempts from IP: %s", clientIP)
+		return nil, fmt.Errorf("too many authentication failures")
+	}
+
 	// 先获取用户信息，检查认证方式
 	user, err := a.authService.GetUserByUsername(username)
 	if err != nil {
 		log.Printf("[SSH Auth] User not found: %s", username)
-		// 记录失败尝试
-		a.recordAttempt(clientIP, "publickey", true)
+		// 记录失败尝试（用户不存在）
+		a.recordAttemptWithTerminate(clientIP, "publickey", true, false, true)
 		// 直接返回error，立即断开连接
 		return nil, fmt.Errorf("user not found")
 	}
@@ -218,9 +273,8 @@ func (a *ServiceAuthenticator) AuthenticatePublicKey(username string, key ssh.Pu
 		log.Printf("[SSH Auth] Public key authentication REJECTED for user %s (authMethod: %s - only password allowed)",
 			username, user.AuthMethod)
 		log.Printf("[SSH Auth] User only supports password authentication - publickey is disabled")
-		// 不记录为 shouldTerminate，因为用户的正确认证方式是密码，应该允许后续的密码认证
-		// 但为了让客户端快速切换到密码，我们记录这次拒绝
-		a.recordAttempt(clientIP, "publickey", true)
+		// 记录被拒绝的尝试
+		a.recordAttemptWithTerminate(clientIP, "publickey", true, false, true)
 		// 直接返回error，告诉客户端公钥认证不可用
 		return nil, fmt.Errorf("public key authentication is disabled for this user, only password authentication is allowed")
 	}
@@ -233,7 +287,7 @@ func (a *ServiceAuthenticator) AuthenticatePublicKey(username string, key ssh.Pu
 	if err != nil {
 		log.Printf("[SSH Auth] Failed to get user public key: %v", err)
 		// 记录失败尝试（用户配置了公钥认证但没有公钥，阻止后续 fallback 到密码）
-		a.recordAttempt(clientIP, "publickey", true)
+		a.recordAttemptWithTerminate(clientIP, "publickey", true, false, true)
 		// 直接返回error，不允许客户端尝试其他认证方法
 		return nil, fmt.Errorf("failed to get user public key: %w", err)
 	}
@@ -243,7 +297,7 @@ func (a *ServiceAuthenticator) AuthenticatePublicKey(username string, key ssh.Pu
 	if err != nil {
 		log.Printf("[SSH Auth] Failed to parse user public key: %v", err)
 		// 记录失败尝试（公钥格式错误，阻止后续 fallback 到密码）
-		a.recordAttempt(clientIP, "publickey", true)
+		a.recordAttemptWithTerminate(clientIP, "publickey", true, false, true)
 		// 直接返回error，不允许客户端尝试其他认证方法
 		return nil, fmt.Errorf("invalid public key format: %w", err)
 	}
@@ -257,7 +311,7 @@ func (a *ServiceAuthenticator) AuthenticatePublicKey(username string, key ssh.Pu
 		log.Printf("[SSH Auth]   Server fingerprint: %s", ssh.FingerprintSHA256(userPublicKey))
 		log.Printf("[SSH Auth] Public key authentication failed - connection will be terminated if password is attempted")
 		// 记录失败尝试（用户配置了公钥但不匹配，标记需要终止后续的密码尝试）
-		a.recordAttemptWithTerminate(clientIP, "publickey", true, true)
+		a.recordAttemptWithTerminate(clientIP, "publickey", true, true, true)
 		// 直接返回error，不允许客户端尝试其他认证方法（比如密码）
 		return nil, fmt.Errorf("public key does not match")
 	}
@@ -266,9 +320,21 @@ func (a *ServiceAuthenticator) AuthenticatePublicKey(username string, key ssh.Pu
 	if user.Status != "active" {
 		log.Printf("[SSH Auth] User account is not active: %s", username)
 		// 记录失败尝试（账号不活跃，阻止后续 fallback 到密码）
-		a.recordAttempt(clientIP, "publickey", true)
+		a.recordAttemptWithTerminate(clientIP, "publickey", true, false, true)
 		// 直接返回error，不允许客户端尝试其他认证方法
 		return nil, fmt.Errorf("user account is not active")
+	}
+
+	// 检查是否需要MFA验证
+	if user.TwoFactorEnabled {
+		log.Printf("[SSH Auth] User %s requires 2FA verification after public key auth (enabled: %v)", username, user.TwoFactorEnabled)
+		// 公钥认证成功但需要MFA，返回特殊结果让Keyboard Interactive处理
+		return &types.AuthResult{
+			Success:           true,
+			UserID:            user.ID,
+			Message:           "Public key authentication successful, MFA required",
+			RequiresTwoFactor: true,
+		}, nil
 	}
 
 	log.Printf("[SSH Auth] Public key authentication SUCCESSFUL for user: %s (ID: %s, AuthMethod: %s)",

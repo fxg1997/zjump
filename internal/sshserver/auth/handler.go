@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"log"
+	"sync"
+	"time"
 
 	"github.com/fisker/zjump-backend/internal/model"
 	"github.com/fisker/zjump-backend/internal/service"
@@ -26,17 +28,56 @@ type AuthHandler interface {
 // PasswordHandler 密码认证处理器
 type PasswordHandler struct {
 	authService *service.AuthService
+	// 记录每个连接的认证尝试历史
+	attempts   map[string][]authAttempt
+	attemptsMu sync.RWMutex
 }
 
 // NewPasswordHandler 创建密码认证处理器
 func NewPasswordHandler(authService *service.AuthService) *PasswordHandler {
 	return &PasswordHandler{
 		authService: authService,
+		attempts:    make(map[string][]authAttempt),
 	}
 }
 
 func (h *PasswordHandler) GetName() string {
 	return "password"
+}
+
+// HasExceededMaxAttempts 检查是否超过最大尝试次数
+func (h *PasswordHandler) HasExceededMaxAttempts(clientIP string, maxAttempts int) bool {
+	h.attemptsMu.RLock()
+	defer h.attemptsMu.RUnlock()
+
+	attempts, exists := h.attempts[clientIP]
+	if !exists {
+		return false
+	}
+
+	// 统计最近的失败尝试次数（包括认证失败和认证方式不匹配）
+	failedCount := 0
+	for _, attempt := range attempts {
+		if attempt.failed || attempt.rejected {
+			failedCount++
+		}
+	}
+
+	return failedCount >= maxAttempts
+}
+
+// recordAttempt 记录认证尝试
+func (h *PasswordHandler) recordAttempt(clientIP, method string, rejected, shouldTerminate, failed bool) {
+	h.attemptsMu.Lock()
+	defer h.attemptsMu.Unlock()
+
+	h.attempts[clientIP] = append(h.attempts[clientIP], authAttempt{
+		method:          method,
+		timestamp:       time.Now(),
+		rejected:        rejected,
+		shouldTerminate: shouldTerminate,
+		failed:          failed,
+	})
 }
 
 func (h *PasswordHandler) CanHandle(username string) (bool, error) {
@@ -57,6 +98,12 @@ func (h *PasswordHandler) Authenticate(username string, credential interface{}, 
 
 	log.Printf("[Password Handler] Authenticating user: %s from IP: %s", username, clientIP)
 
+	// 首先检查是否超过最大尝试次数
+	if h.HasExceededMaxAttempts(clientIP, 3) {
+		log.Printf("[Password Handler] Authentication BLOCKED - too many failed attempts from IP: %s", clientIP)
+		return nil, fmt.Errorf("too many authentication failures")
+	}
+
 	loginReq := &model.LoginRequest{
 		Username: username,
 		Password: password,
@@ -65,7 +112,24 @@ func (h *PasswordHandler) Authenticate(username string, credential interface{}, 
 	loginResp, err := h.authService.Login(loginReq, clientIP, "SSH-Client")
 	if err != nil {
 		log.Printf("[Password Handler] Authentication failed for user %s: %v", username, err)
+		// 记录失败尝试
+		h.recordAttempt(clientIP, "password", false, false, true)
 		return nil, fmt.Errorf("password authentication failed")
+	}
+
+	// 调试：检查MFA状态
+	log.Printf("[Password Handler] Login response: RequiresTwoFactor=%v, TwoFactorEnabled=%v", loginResp.RequiresTwoFactor, loginResp.TwoFactorEnabled)
+
+	// 检查是否需要MFA验证
+	if loginResp.RequiresTwoFactor {
+		log.Printf("[Password Handler] User %s requires 2FA verification (enabled: %v)", username, loginResp.TwoFactorEnabled)
+		// 返回特殊结果，表示需要MFA验证
+		return &types.AuthResult{
+			Success:           false,
+			UserID:            loginResp.User.ID,
+			Message:           "2FA verification required",
+			RequiresTwoFactor: true,
+		}, nil
 	}
 
 	log.Printf("[Password Handler] Authentication successful for user: %s (ID: %s)", username, loginResp.User.ID)
@@ -179,17 +243,65 @@ func (h *MFAHandler) CanHandle(username string) (bool, error) {
 		return false, fmt.Errorf("user not found: %w", err)
 	}
 
-	// 检查用户是否启用了 MFA（预留字段）
-	// return user.MFAEnabled, nil
-
-	// 目前默认不启用
-	_ = user
-	return false, nil
+	// 检查用户是否启用了 MFA
+	return user.TwoFactorEnabled, nil
 }
 
 func (h *MFAHandler) Authenticate(username string, credential interface{}, clientIP string) (*types.AuthResult, error) {
-	// TODO: 实现 MFA 认证逻辑
-	// 可以支持 TOTP、短信验证码、邮箱验证码等
-	log.Printf("[MFA Handler] MFA authentication not implemented yet")
-	return nil, fmt.Errorf("MFA authentication not implemented")
+	log.Printf("[MFA Handler] Authenticating user: %s from IP: %s", username, clientIP)
+
+	// 获取用户信息
+	user, err := h.authService.GetUserByUsername(username)
+	if err != nil {
+		return nil, fmt.Errorf("user not found: %w", err)
+	}
+
+	// 检查用户是否启用了MFA
+	if !user.TwoFactorEnabled {
+		return nil, fmt.Errorf("MFA not enabled for user")
+	}
+
+	// 解析MFA凭证（TOTP代码或备用码）
+	var totpCode, backupCode string
+	if code, ok := credential.(string); ok {
+		// 简单判断：6位数字为TOTP，其他为备用码
+		if len(code) == 6 && isNumeric(code) {
+			totpCode = code
+		} else {
+			backupCode = code
+		}
+	} else {
+		return nil, fmt.Errorf("invalid MFA credential type")
+	}
+
+	// 验证MFA代码
+	loginReq := &model.LoginRequest{
+		Username:      username,
+		TwoFactorCode: totpCode,
+		BackupCode:    backupCode,
+	}
+
+	loginResp, err := h.authService.Login(loginReq, clientIP, "SSH-MFA")
+	if err != nil {
+		log.Printf("[MFA Handler] MFA verification failed for user %s: %v", username, err)
+		return nil, fmt.Errorf("MFA verification failed: %w", err)
+	}
+
+	log.Printf("[MFA Handler] MFA authentication successful for user: %s (ID: %s)", username, loginResp.User.ID)
+
+	return &types.AuthResult{
+		Success: true,
+		UserID:  loginResp.User.ID,
+		Message: "MFA authentication successful",
+	}, nil
+}
+
+// isNumeric 检查字符串是否为纯数字
+func isNumeric(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }

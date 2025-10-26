@@ -254,13 +254,14 @@ func (s *AssetSyncService) syncFromPrometheus(config *model.AssetSyncConfig) (in
 		// 不存在，创建新主机
 		tags := fmt.Sprintf(`["prometheus","%s"]`, info.job)
 		newHost := &model.Host{
-			ID:         uuid.New().String(),
-			Name:       fmt.Sprintf("prometheus-%s-%s", info.job, ip),
-			IP:         ip,
-			Port:       22, // 默认SSH端口
-			DeviceType: "linux",
-			Status:     info.status,
-			Tags:       tags,
+			ID:             uuid.New().String(),
+			Name:           fmt.Sprintf("prometheus-%s-%s", info.job, ip),
+			IP:             ip,
+			Port:           22,       // 默认SSH端口
+			DeviceType:     "server", // 使用新的设备类型常量
+			Status:         info.status,
+			Tags:           tags,
+			ConnectionMode: "auto", // 新增字段：连接模式
 			// 注意：认证信息和协议请通过系统用户配置
 		}
 

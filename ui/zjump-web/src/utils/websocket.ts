@@ -72,9 +72,13 @@ export function getDeviceTypeName(deviceType: DeviceType): string {
   const names: Record<DeviceType, string> = {
     linux: 'Linux 服务器',
     windows: 'Windows 服务器',
-    network: '网络设备',
     vmware: 'VMware 虚拟机',
     docker: 'Docker 容器',
+    switch: '交换机',
+    router: '路由器',
+    firewall: '防火墙',
+    storage: '存储设备',
+    other: '其他设备',
   };
   return names[deviceType] || deviceType;
 }
@@ -100,6 +104,11 @@ export function getDeviceIcon(deviceType: DeviceType): string {
     network: 'Router',
     vmware: 'Cloud',
     docker: 'ViewInAr',
+    server: 'Storage',
+    switch: 'Hub',
+    router: 'Router',
+    firewall: 'Security',
+    other: 'DeviceUnknown',
   };
   return icons[deviceType] || 'Computer';
 }

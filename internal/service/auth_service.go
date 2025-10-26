@@ -18,6 +18,7 @@ import (
 	"github.com/fisker/zjump-backend/internal/model"
 	"github.com/fisker/zjump-backend/internal/repository"
 	"github.com/fisker/zjump-backend/pkg/sshkey"
+	"github.com/fisker/zjump-backend/pkg/twofactor"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -39,14 +40,16 @@ type Claims struct {
 }
 
 type AuthService struct {
-	repo        *repository.UserRepository
-	settingRepo *repository.SettingRepository
+	repo         *repository.UserRepository
+	settingRepo  *repository.SettingRepository
+	TwoFactorSvc *twofactor.TwoFactorService
 }
 
 func NewAuthService(repo *repository.UserRepository, settingRepo *repository.SettingRepository) *AuthService {
 	return &AuthService{
-		repo:        repo,
-		settingRepo: settingRepo,
+		repo:         repo,
+		settingRepo:  settingRepo,
+		TwoFactorSvc: twofactor.NewTwoFactorService("ZJump"),
 	}
 }
 
@@ -123,6 +126,76 @@ func (s *AuthService) Login(req *model.LoginRequest, loginIP, userAgent string) 
 		return nil, errors.New("账号已过期，请联系管理员")
 	}
 
+	// 检查全局2FA配置
+	var globalConfig model.TwoFactorConfig
+	if err := s.repo.GetDB().First(&globalConfig).Error; err == nil && globalConfig.Enabled {
+		// 全局2FA已启用，检查用户是否已设置2FA
+		if !user.TwoFactorEnabled {
+			// 用户未设置2FA，允许登录但标记需要设置2FA
+			// 生成临时token，让用户能够进入系统设置2FA
+			token, err := s.GenerateToken(user)
+			if err != nil {
+				return nil, fmt.Errorf("生成Token失败: %w", err)
+			}
+
+			// 更新最后登录时间
+			now := time.Now()
+			if err := s.repo.UpdateUserLastLogin(user.ID, now, loginIP); err != nil {
+				fmt.Printf("更新最后登录时间失败: %v\n", err)
+			}
+
+			// 创建平台登录记录
+			loginRecord := &model.PlatformLoginRecord{
+				ID:        uuid.New().String(),
+				UserID:    user.ID,
+				Username:  user.Username,
+				LoginIP:   loginIP,
+				UserAgent: userAgent,
+				LoginTime: now,
+				Status:    "active",
+			}
+			if err := s.repo.CreatePlatformLoginRecord(loginRecord); err != nil {
+				fmt.Printf("创建平台登录记录失败: %v\n", err)
+			}
+
+			return &model.LoginResponse{
+				Token:               token,
+				User:                *user,
+				RequiresTwoFactor:   false, // 允许登录
+				TwoFactorEnabled:    false,
+				NeedsTwoFactorSetup: true, // 标记需要设置2FA
+			}, nil
+		}
+
+		// 用户已启用2FA，需要验证2FA代码
+		if req.TwoFactorCode == "" && req.BackupCode == "" {
+			return &model.LoginResponse{
+				RequiresTwoFactor: true,
+				TwoFactorEnabled:  true,
+				User:              *user,
+			}, nil
+		}
+
+		// 验证2FA代码
+		if !s.validateTwoFactorCode(user, req.TwoFactorCode, req.BackupCode) {
+			return nil, errors.New("2FA验证失败")
+		}
+	} else if user.TwoFactorEnabled {
+		// 用户个人启用了2FA，需要验证
+		if req.TwoFactorCode == "" && req.BackupCode == "" {
+			return &model.LoginResponse{
+				RequiresTwoFactor: true,
+				TwoFactorEnabled:  true,
+				User:              *user,
+			}, nil
+		}
+
+		// 验证2FA代码
+		if !s.validateTwoFactorCode(user, req.TwoFactorCode, req.BackupCode) {
+			return nil, errors.New("2FA验证失败")
+		}
+	}
+
 	// 生成 JWT Token
 	token, err := s.GenerateToken(user)
 	if err != nil {
@@ -179,6 +252,44 @@ func (s *AuthService) authenticateWithPassword(username, password string) (*mode
 	}
 
 	return user, nil
+}
+
+// validateTwoFactorCode 验证2FA代码
+func (s *AuthService) validateTwoFactorCode(user *model.User, totpCode, backupCode string) bool {
+	// 验证TOTP代码
+	if totpCode != "" && s.TwoFactorSvc.ValidateCode(user.TwoFactorSecret, totpCode) {
+		return true
+	}
+
+	// 验证备用码
+	if backupCode != "" && user.TwoFactorBackupCodes != "" {
+		backupCodes, err := s.TwoFactorSvc.DeserializeBackupCodes(user.TwoFactorBackupCodes)
+		if err == nil && s.TwoFactorSvc.ValidateBackupCode(backupCodes, backupCode) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// ValidateTwoFactorCode 公开的2FA验证方法
+func (s *AuthService) ValidateTwoFactorCode(user *model.User, totpCode, backupCode string) bool {
+	return s.validateTwoFactorCode(user, totpCode, backupCode)
+}
+
+// ValidatePassword 验证用户密码
+func (s *AuthService) ValidatePassword(user *model.User, password string) error {
+	// 检查用户状态
+	if user.Status != "active" {
+		return errors.New("用户已被禁用")
+	}
+
+	// 验证密码
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
+		return errors.New("密码错误")
+	}
+
+	return nil
 }
 
 // authenticateWithLDAP 使用 LDAP 认证

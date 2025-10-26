@@ -273,6 +273,16 @@ func (s *HostMonitorService) CheckAllHosts() {
 
 // checkAllHosts 检查所有主机状态（内部方法）
 func (s *HostMonitorService) checkAllHosts() {
+	// 检查是否启用监控
+	s.configMu.RLock()
+	enabled := s.config.Enabled
+	s.configMu.RUnlock()
+
+	if !enabled {
+		log.Printf("[HostMonitor] ⏸️  Monitoring is disabled, skipping check...")
+		return
+	}
+
 	// 如果启用了 Redis，使用分布式锁
 	if pkgredis.IsEnabled() {
 		s.checkAllHostsWithLock()

@@ -23,8 +23,15 @@ type User struct {
 	AutoDisableOnExpiry    bool       `json:"autoDisableOnExpiry" gorm:"type:boolean;default:true"`
 	LastLoginTime          *time.Time `json:"lastLoginTime" gorm:"type:timestamp"`
 	LastLoginIP            string     `json:"lastLoginIp" gorm:"type:varchar(45)"`
-	CreatedAt              time.Time  `json:"createdAt" gorm:"autoCreateTime"`
-	UpdatedAt              time.Time  `json:"updatedAt" gorm:"autoUpdateTime"`
+
+	// 2FA相关字段
+	TwoFactorEnabled     bool       `json:"twoFactorEnabled" gorm:"column:two_factor_enabled;type:boolean;default:false"`
+	TwoFactorSecret      string     `json:"-" gorm:"column:two_factor_secret;type:varchar(255)"` // 2FA密钥，不在JSON中暴露
+	TwoFactorBackupCodes string     `json:"-" gorm:"column:two_factor_backup_codes;type:text"`   // 备用码，不在JSON中暴露
+	TwoFactorVerifiedAt  *time.Time `json:"twoFactorVerifiedAt,omitempty" gorm:"column:two_factor_verified_at;type:timestamp"`
+
+	CreatedAt time.Time `json:"createdAt" gorm:"autoCreateTime"`
+	UpdatedAt time.Time `json:"updatedAt" gorm:"autoUpdateTime"`
 }
 
 func (User) TableName() string {
@@ -94,12 +101,19 @@ type UserWithGroups struct {
 type LoginRequest struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
+	// 2FA相关字段
+	TwoFactorCode string `json:"twoFactorCode,omitempty"`
+	BackupCode    string `json:"backupCode,omitempty"`
 }
 
 // LoginResponse 登录响应
 type LoginResponse struct {
 	Token string `json:"token"`
 	User  User   `json:"user"`
+	// 2FA相关字段
+	RequiresTwoFactor   bool `json:"requiresTwoFactor,omitempty"`
+	TwoFactorEnabled    bool `json:"twoFactorEnabled,omitempty"`
+	NeedsTwoFactorSetup bool `json:"needsTwoFactorSetup,omitempty"`
 }
 
 // RegisterRequest 注册请求
@@ -147,4 +161,44 @@ type ExpirationNotificationConfig struct {
 
 func (ExpirationNotificationConfig) TableName() string {
 	return "expiration_notification_config"
+}
+
+// TwoFactorConfig 双因素认证全局配置
+type TwoFactorConfig struct {
+	ID        uint      `json:"id" gorm:"primaryKey;autoIncrement"`
+	Enabled   bool      `json:"enabled" gorm:"type:boolean;default:false"`       // 是否启用全局2FA
+	Issuer    string    `json:"issuer" gorm:"type:varchar(100);default:'ZJump'"` // 2FA应用名称
+	CreatedAt time.Time `json:"createdAt" gorm:"autoCreateTime"`
+	UpdatedAt time.Time `json:"updatedAt" gorm:"autoUpdateTime"`
+}
+
+func (TwoFactorConfig) TableName() string {
+	return "two_factor_config"
+}
+
+// TwoFactorSetupRequest 2FA设置请求
+type TwoFactorSetupRequest struct {
+	Secret     string `json:"secret" binding:"required"`
+	Code       string `json:"code" binding:"required"`
+	BackupCode string `json:"backupCode,omitempty"`
+}
+
+// TwoFactorVerifyRequest 2FA验证请求
+type TwoFactorVerifyRequest struct {
+	Code       string `json:"code" binding:"required"`
+	BackupCode string `json:"backupCode,omitempty"`
+}
+
+// TwoFactorSetupResponse 2FA设置响应
+type TwoFactorSetupResponse struct {
+	QRCode      string   `json:"qrCode"`      // 二维码数据URL
+	Secret      string   `json:"secret"`      // 密钥（用于手动输入）
+	BackupCodes []string `json:"backupCodes"` // 备用码
+}
+
+// TwoFactorStatus 2FA状态
+type TwoFactorStatus struct {
+	Enabled     bool       `json:"enabled"`
+	VerifiedAt  *time.Time `json:"verifiedAt,omitempty"`
+	BackupCodes []string   `json:"backupCodes,omitempty"`
 }

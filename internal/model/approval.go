@@ -21,16 +21,15 @@ type ApprovalType string
 const (
 	ApprovalTypeHostAccess      ApprovalType = "host_access"       // 主机访问权限
 	ApprovalTypeHostGroupAccess ApprovalType = "host_group_access" // 主机组访问权限
-	ApprovalTypeCommandExec     ApprovalType = "command_exec"      // 命令执行权限
-	ApprovalTypeFileTransfer    ApprovalType = "file_transfer"     // 文件传输权限
 )
 
 // ApprovalPlatform 审批平台（仅支持第三方平台）
 type ApprovalPlatform string
 
 const (
+	ApprovalPlatformInternal ApprovalPlatform = "internal" // 内部审批系统
 	ApprovalPlatformFeishu   ApprovalPlatform = "feishu"   // 飞书
-	ApprovalPlatformDingtalk ApprovalPlatform = "dingtalk" // 钉钉
+	ApprovalPlatformDingTalk ApprovalPlatform = "dingtalk" // 钉钉
 	ApprovalPlatformWeChat   ApprovalPlatform = "wechat"   // 企业微信
 	ApprovalPlatformCustom   ApprovalPlatform = "custom"   // 自定义
 )
@@ -126,6 +125,18 @@ type ApprovalConfig struct {
 
 	// 表单字段映射
 	FormFields string `json:"form_fields" gorm:"column:form_fields;type:text"` // 表单字段映射JSON
+
+	// 审批人配置
+	ApproverUserIDs string `json:"approver_user_ids" gorm:"column:approver_user_ids;type:text"` // 审批人用户ID列表(JSON)
+
+	// API配置
+	APIBaseURL    string `json:"api_base_url" gorm:"column:api_base_url"`       // API基础URL，用户自定义填写
+	APIPath       string `json:"api_path" gorm:"column:api_path"`               // API调用路径（创建审批）
+	APIPathGet    string `json:"api_path_get" gorm:"column:api_path_get"`       // 获取审批API路径
+	APIPathCancel string `json:"api_path_cancel" gorm:"column:api_path_cancel"` // 取消审批API路径
+
+	// 回调配置
+	CallbackURL string `json:"callback_url" gorm:"column:callback_url"` // 回调URL
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

@@ -7,30 +7,39 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/fisker/zjump-backend/internal/model"
+	"github.com/fisker/zjump-backend/internal/repository"
+	"gorm.io/gorm"
 )
 
 // FeishuProvider 飞书审批提供者
 type FeishuProvider struct {
-	appID        string
-	appSecret    string
-	approvalCode string // 审批定义 Code
-	baseURL      string
-	client       *http.Client
+	config   *model.ApprovalConfig
+	baseURL  string
+	client   *http.Client
+	db       *gorm.DB
+	hostRepo *repository.HostRepository
 }
 
 // NewFeishuProvider 创建飞书审批提供者
-func NewFeishuProvider(appID, appSecret, approvalCode string) *FeishuProvider {
+func NewFeishuProvider(config *model.ApprovalConfig, db *gorm.DB) *FeishuProvider {
+	// 使用用户配置的API基础URL，如果没有配置则使用默认值
+	baseURL := config.APIBaseURL
+	if baseURL == "" {
+		baseURL = "https://open.larksuite.com/open-apis" // 默认值
+	}
+
 	return &FeishuProvider{
-		appID:        appID,
-		appSecret:    appSecret,
-		approvalCode: approvalCode,
-		baseURL:      "https://open.feishu.cn/open-apis",
+		config:  config,
+		baseURL: baseURL,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		db:       db,
+		hostRepo: repository.NewHostRepository(db),
 	}
 }
 
@@ -44,8 +53,8 @@ func (p *FeishuProvider) getTenantAccessToken(ctx context.Context) (string, erro
 	url := fmt.Sprintf("%s/auth/v3/tenant_access_token/internal", p.baseURL)
 
 	reqBody := map[string]string{
-		"app_id":     p.appID,
-		"app_secret": p.appSecret,
+		"app_id":     p.config.AppID,
+		"app_secret": p.config.AppSecret,
 	}
 
 	body, _ := json.Marshal(reqBody)
@@ -78,7 +87,7 @@ func (p *FeishuProvider) getTenantAccessToken(ctx context.Context) (string, erro
 	}
 
 	if result.Code != 0 {
-		return "", fmt.Errorf("get tenant access token failed: %s", result.Msg)
+		return "", fmt.Errorf("获取飞书访问令牌失败 [%d]: %s", result.Code, result.Msg)
 	}
 
 	return result.TenantAccessToken, nil
@@ -86,95 +95,36 @@ func (p *FeishuProvider) getTenantAccessToken(ctx context.Context) (string, erro
 
 // CreateApproval 创建审批单
 func (p *FeishuProvider) CreateApproval(ctx context.Context, approval *model.Approval) (string, error) {
+	// 检查审批代码是否存在
+	if p.config.ApprovalCode == "" {
+		return "", fmt.Errorf("审批代码未配置")
+	}
+
+	// 获取访问令牌
 	token, err := p.getTenantAccessToken(ctx)
 	if err != nil {
-		return "", fmt.Errorf("get token failed: %w", err)
+		return "", fmt.Errorf("获取访问令牌失败: %v", err)
 	}
 
 	// 构建审批表单
-	formContent := p.buildFormContent(approval)
-
-	url := fmt.Sprintf("%s/approval/v4/instances", p.baseURL)
-	reqBody := map[string]interface{}{
-		"approval_code": p.approvalCode,
-		"user_id":       approval.ApplicantID,
-		"form":          formContent,
-	}
-
-	body, _ := json.Marshal(reqBody)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	formContent, err := p.buildFormContent(approval)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("构建表单内容失败: %v", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	var result struct {
-		Code int    `json:"code"`
-		Msg  string `json:"msg"`
-		Data struct {
-			InstanceCode string `json:"instance_code"`
-		} `json:"data"`
-	}
-
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", err
-	}
-
-	if result.Code != 0 {
-		return "", fmt.Errorf("create approval failed: %s", result.Msg)
-	}
-
-	return result.Data.InstanceCode, nil
+	// 直接使用HTTP请求，因为SDK可能有兼容性问题
+	return p.createApprovalViaHTTP(ctx, token, formContent, approval)
 }
 
 // buildFormContent 构建表单内容
-func (p *FeishuProvider) buildFormContent(approval *model.Approval) string {
-	formData := []map[string]interface{}{
-		{
-			"id":    "title",
-			"type":  "input",
-			"value": approval.Title,
-		},
-		{
-			"id":    "reason",
-			"type":  "textarea",
-			"value": approval.Reason,
-		},
-		{
-			"id":    "resource_type",
-			"type":  "input",
-			"value": approval.ResourceType,
-		},
-		{
-			"id":    "duration",
-			"type":  "input",
-			"value": fmt.Sprintf("%d小时", approval.Duration),
-		},
+func (p *FeishuProvider) buildFormContent(approval *model.Approval) (string, error) {
+	// 如果配置中有自定义表单字段，使用配置的字段
+	if p.config.FormFields != "" {
+		return p.buildFormContentFromConfig(approval)
 	}
 
-	if len(approval.ResourceNames) > 0 {
-		formData = append(formData, map[string]interface{}{
-			"id":    "resources",
-			"type":  "textarea",
-			"value": fmt.Sprintf("%v", approval.ResourceNames),
-		})
-	}
-
-	content, _ := json.Marshal(formData)
-	return string(content)
+	// 如果没有配置表单字段，返回错误
+	return "", fmt.Errorf("未配置表单字段，请在工单审批配置中设置form_fields")
 }
 
 // GetApprovalStatus 获取审批单状态
@@ -184,7 +134,12 @@ func (p *FeishuProvider) GetApprovalStatus(ctx context.Context, externalID strin
 		return nil, err
 	}
 
-	url := fmt.Sprintf("%s/approval/v4/instances/%s", p.baseURL, externalID)
+	// 使用数据库配置中的获取审批API路径
+	apiPathGet := p.config.APIPathGet
+	if apiPathGet == "" {
+		apiPathGet = "/approval/v4/instances" // 默认路径
+	}
+	url := fmt.Sprintf("%s%s/%s", p.baseURL, apiPathGet, externalID)
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -253,7 +208,12 @@ func (p *FeishuProvider) CancelApproval(ctx context.Context, externalID string) 
 		return err
 	}
 
-	url := fmt.Sprintf("%s/approval/v4/instances/%s/cancel", p.baseURL, externalID)
+	// 使用数据库配置中的取消审批API路径
+	apiPathCancel := p.config.APIPathCancel
+	if apiPathCancel == "" {
+		apiPathCancel = "/approval/v4/instances/cancel" // 默认路径
+	}
+	url := fmt.Sprintf("%s%s", p.baseURL, apiPathCancel)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
 	if err != nil {
 		return err
@@ -327,4 +287,221 @@ func (p *FeishuProvider) ValidateConfig(config map[string]interface{}) error {
 	}
 
 	return nil
+}
+
+// buildNodeApproverOpenIDList 构建审批人 open_id 列表
+func (p *FeishuProvider) buildNodeApproverOpenIDList(approval *model.Approval) []map[string]interface{} {
+	nodeApproverList := []map[string]interface{}{}
+
+	// 从配置中读取审批人列表
+	var approverIDs []string
+	if p.config.ApproverUserIDs != "" {
+		if err := json.Unmarshal([]byte(p.config.ApproverUserIDs), &approverIDs); err == nil && len(approverIDs) > 0 {
+			nodeApproverList = append(nodeApproverList, map[string]interface{}{
+				"key":   "default_node",
+				"value": approverIDs,
+			})
+		}
+	}
+
+	// 如果没有配置审批人，返回空列表
+	// 审批人必须通过数据库配置设置
+	return nodeApproverList
+}
+
+// buildNodeApproverUserIDList 构建审批人 user_id 列表
+func (p *FeishuProvider) buildNodeApproverUserIDList(approval *model.Approval) []map[string]interface{} {
+	nodeApproverList := []map[string]interface{}{}
+
+	// 从配置中读取审批人列表
+	var approverIDs []string
+	if p.config.ApproverUserIDs != "" {
+		if err := json.Unmarshal([]byte(p.config.ApproverUserIDs), &approverIDs); err == nil && len(approverIDs) > 0 {
+			nodeApproverList = append(nodeApproverList, map[string]interface{}{
+				"key":   "default_node",
+				"value": approverIDs,
+			})
+		}
+	}
+
+	// 如果没有配置审批人，返回空列表
+	// 审批人必须通过数据库配置设置
+	return nodeApproverList
+}
+
+// getHostIPByName 根据主机名获取IP地址
+func (p *FeishuProvider) getHostIPByName(hostName string) string {
+	if p.hostRepo == nil {
+		return ""
+	}
+
+	// 通过主机名查询主机信息
+	hosts, _, err := p.hostRepo.FindAll(1, 1, hostName, nil)
+	if err != nil || len(hosts) == 0 {
+		return ""
+	}
+
+	return hosts[0].IP
+}
+
+// createApprovalViaHTTP 使用HTTP请求创建审批
+func (p *FeishuProvider) createApprovalViaHTTP(ctx context.Context, token, formContent string, approval *model.Approval) (string, error) {
+	// 使用数据库配置中的API路径，如果没有配置则使用默认路径
+	apiPath := p.config.APIPath
+	if apiPath == "" {
+		apiPath = "/approval/v4/instances" // 默认路径
+	}
+	url := fmt.Sprintf("%s%s", p.baseURL, apiPath)
+
+	// 直接使用当前登录用户的用户名作为userID
+	userID := approval.ApplicantID
+	if userID == "" {
+		userID = approval.ApplicantName // 如果ApplicantID为空，使用ApplicantName
+	}
+	openID := userID // 对于飞书，OpenID通常与UserID相同
+
+	reqBody := map[string]interface{}{
+		"approval_code": p.config.ApprovalCode,
+		"user_id":       userID,
+		"open_id":       openID,
+		"form":          formContent,
+	}
+
+	body, _ := json.Marshal(reqBody)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	var result struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			InstanceCode string `json:"instance_code"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("解析响应失败: %v", err)
+	}
+
+	if result.Code != 0 {
+		return "", fmt.Errorf("HTTP请求失败 [%d]: %s", result.Code, result.Msg)
+	}
+
+	return result.Data.InstanceCode, nil
+}
+
+// buildFormContentFromConfig 从配置中构建表单内容
+func (p *FeishuProvider) buildFormContentFromConfig(approval *model.Approval) (string, error) {
+	var formFields []map[string]interface{}
+	if err := json.Unmarshal([]byte(p.config.FormFields), &formFields); err != nil {
+		return "", fmt.Errorf("解析表单字段配置失败: %v", err)
+	}
+
+	var formData []map[string]interface{}
+	for _, field := range formFields {
+		formItem := map[string]interface{}{
+			"id":   field["id"],
+			"type": field["type"],
+		}
+
+		// 根据字段名称映射数据
+		fieldName := ""
+		if name, ok := field["name"].(string); ok {
+			fieldName = name
+		}
+
+		switch fieldName {
+		case "工单标题", "title":
+			formItem["value"] = approval.Title
+		case "详细描述", "description":
+			formItem["value"] = approval.Description
+		case "申请理由", "reason":
+			formItem["value"] = approval.Reason
+		case "申请资源", "resources":
+			if len(approval.ResourceNames) > 0 {
+				var resources []string
+				for _, name := range approval.ResourceNames {
+					ip := p.getHostIPByName(name)
+					if ip != "" {
+						resources = append(resources, fmt.Sprintf("%s (IP: %s)", name, ip))
+					} else {
+						resources = append(resources, fmt.Sprintf("%s (IP: 未找到)", name))
+					}
+				}
+				formItem["value"] = strings.Join(resources, "\n")
+			} else {
+				formItem["value"] = approval.ResourceType
+			}
+		case "申请类型", "type":
+			// 从配置中获取选项值
+			formItem["value"] = p.getApprovalTypeValue(approval.Type, field)
+		case "权限时长", "duration":
+			formItem["value"] = fmt.Sprintf("%d", approval.Duration)
+		default:
+			// 对于未知字段，使用空值
+			formItem["value"] = ""
+		}
+
+		formData = append(formData, formItem)
+	}
+
+	jsonData, _ := json.Marshal(formData)
+	return string(jsonData), nil
+}
+
+// getApprovalTypeValue 根据审批类型和字段配置获取对应的选项值
+func (p *FeishuProvider) getApprovalTypeValue(approvalType model.ApprovalType, field map[string]interface{}) string {
+	// 如果字段配置中有选项列表，尝试匹配
+	if options, ok := field["option"].([]interface{}); ok {
+		for _, option := range options {
+			if optMap, ok := option.(map[string]interface{}); ok {
+				text := ""
+				value := ""
+				if t, exists := optMap["text"].(string); exists {
+					text = t
+				}
+				if v, exists := optMap["value"].(string); exists {
+					value = v
+				}
+
+				// 根据审批类型匹配文本
+				switch approvalType {
+				case model.ApprovalTypeHostAccess:
+					if text == "host_access" || text == "主机访问权限" {
+						return value
+					}
+				case model.ApprovalTypeHostGroupAccess:
+					if text == "host_group_access" || text == "主机组访问权限" {
+						return value
+					}
+				}
+			}
+		}
+	}
+
+	// 如果没有找到匹配的选项，返回默认值
+	switch approvalType {
+	case model.ApprovalTypeHostAccess:
+		return "mh22s1w3-nkqsak2eis-0"
+	case model.ApprovalTypeHostGroupAccess:
+		return "mh22s1w3-dipw4j04vb-0"
+	default:
+		return "mh22s1w3-nkqsak2eis-0"
+	}
 }

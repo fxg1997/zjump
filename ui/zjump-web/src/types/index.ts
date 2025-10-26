@@ -1,5 +1,5 @@
 // 设备类型
-export type DeviceType = 'linux' | 'windows' | 'network' | 'vmware' | 'docker' | 'server' | 'switch' | 'router' | 'firewall' | 'other';
+export type DeviceType = 'linux' | 'windows' | 'vmware' | 'docker' | 'switch' | 'router' | 'firewall' | 'storage' | 'other';
 
 // 连接协议
 export type Protocol = 'ssh' | 'rdp';
@@ -12,6 +12,9 @@ export interface Host {
   name: string;
   ip: string;
   port: number;
+  username: string;           // 默认用户名
+  password?: string;          // 默认密码
+  privateKey?: string;        // 默认私钥
   status: 'online' | 'offline' | 'unknown';
   os: string;
   cpu?: string;
@@ -21,6 +24,7 @@ export interface Host {
   lastLoginTime?: string;
   loginCount: number;
   deviceType: DeviceType;     // 设备类型
+  protocol: Protocol;         // 连接协议
   connectionMode?: 'auto' | 'direct' | 'proxy';  // 连接模式
   proxyId?: string;            // 代理ID
   networkZone?: string;        // 网络区域
@@ -40,6 +44,20 @@ export interface LoginRecord {
   status: 'active' | 'completed' | 'failed';
   loginIp?: string;
   userAgent?: string;
+}
+
+// 会话记录
+export interface SessionRecord {
+  id: string;
+  sessionId: string;
+  hostName: string;
+  hostIp: string;
+  username: string;
+  startTime: string;
+  endTime: string;
+  duration: number;
+  commandCount: number;
+  status: 'active' | 'closed';
 }
 
 // 统计信息
@@ -99,6 +117,7 @@ export interface User {
   fullName?: string;
   role: 'admin' | 'user';
   status: 'active' | 'inactive';
+  authMethod: 'password' | 'publickey' | 'both';
   expiresAt?: string;
   expirationWarningSent?: boolean;
   autoDisableOnExpiry?: boolean;
@@ -116,11 +135,14 @@ export interface PermissionRule {
   name: string;
   userGroupId: string;
   userGroupName?: string;
+  userGroupNames?: string[];  // 用户组名称列表
   hostGroupId?: string;
   hostGroupName?: string;
+  hostGroupNames?: string[];  // 主机组名称列表
   hostIds?: string;
   systemUserId: string;
   systemUserName?: string;
+  systemUserNames?: string[];  // 系统用户名称列表
   validFrom?: string;
   validTo?: string;
   enabled: boolean;

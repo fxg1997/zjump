@@ -72,6 +72,7 @@ const menuItemsConfig = [
   { key: 'history', icon: <HistoryIcon />, path: '/history' },
   { key: 'blacklist', icon: <SecurityIcon />, path: '/blacklist', adminOnly: true },
   { key: 'users', icon: <PeopleIcon />, path: '/users', adminOnly: true },
+  { key: 'profile', icon: <PersonIcon />, path: '/profile' },
   { key: 'settings', icon: <SettingsIcon />, path: '/settings', adminOnly: true },
 ];
 

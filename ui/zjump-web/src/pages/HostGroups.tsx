@@ -569,8 +569,8 @@ export default function HostGroups() {
 
       {/* 工具栏 */}
       <Paper sx={{ p: 2, mb: 3 }}>
-        <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} md={4}>
+        <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, alignItems: 'center' }}>
+          <Box sx={{ flex: { xs: 'none', md: '0 0 33.333%' } }}>
             <TextField
               fullWidth
               size="small"
@@ -588,8 +588,8 @@ export default function HostGroups() {
                 ),
               }}
             />
-          </Grid>
-          <Grid item xs={12} md={8}>
+          </Box>
+          <Box sx={{ flex: 1 }}>
             <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', justifyContent: 'flex-end' }}>
               {/* 排序按钮 */}
               <Button
@@ -606,8 +606,8 @@ export default function HostGroups() {
                 {t('hostGroups.search.showing', { filtered: filteredGroups.length, total: totalGroups })}
               </Typography>
             </Box>
-          </Grid>
-        </Grid>
+          </Box>
+        </Box>
       </Paper>
 
       {/* 排序菜单 */}

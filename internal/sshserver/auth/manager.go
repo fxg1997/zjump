@@ -31,7 +31,7 @@ func NewAuthManager(authService *service.AuthService) *AuthManager {
 	// 注册认证处理器
 	manager.RegisterHandler(NewPasswordHandler(authService))
 	manager.RegisterHandler(NewPublicKeyHandler(authService))
-	// manager.RegisterHandler(NewMFAHandler(authService)) // 预留 MFA 接口
+	manager.RegisterHandler(NewMFAHandler(authService)) // 启用 MFA 接口
 
 	log.Printf("[Auth Manager] Initialized with %d handlers", len(manager.handlers))
 	for _, h := range manager.handlers {
@@ -55,6 +55,11 @@ func (m *AuthManager) cleanupFailedAttempts() {
 		m.failedPubkeyAttempts = make(map[string]bool)
 		m.attemptsMu.Unlock()
 	}
+}
+
+// GetAuthService 获取认证服务（用于SSH服务器）
+func (m *AuthManager) GetAuthService() *service.AuthService {
+	return m.authService
 }
 
 // RegisterHandler 注册认证处理器

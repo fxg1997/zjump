@@ -1,150 +1,54 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
-  Container,
-  Paper,
-  Typography,
   Box,
+  Typography,
+  Card,
+  CardContent,
+  Avatar,
   Button,
-  Alert,
   Divider,
-  IconButton,
-  Chip,
-  Stack,
+  Alert,
   CircularProgress,
 } from '@mui/material';
 import {
-  Key as KeyIcon,
-  Download as DownloadIcon,
-  Delete as DeleteIcon,
-  Refresh as RefreshIcon,
-  ContentCopy as ContentCopyIcon,
   Person as PersonIcon,
+  Security as SecurityIcon,
+  VpnKey as VpnKeyIcon,
+  Settings as SettingsIcon,
 } from '@mui/icons-material';
-import { userManagementApi } from '../api/api';
 import { useTranslation } from 'react-i18next';
+import { authApi } from '../api/api';
+import TwoFactorSettings from '../components/settings/TwoFactorSettings';
+import SSHKeyManagement from '../components/SSHKeyManagement';
+import PersonalInfoManagement from '../components/PersonalInfoManagement';
 
 export default function Profile() {
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [hasKey, setHasKey] = useState(false);
-  const [publicKey, setPublicKey] = useState('');
-  const [fingerprint, setFingerprint] = useState('');
-  const [generatedAt, setGeneratedAt] = useState('');
-  const [authMethod, setAuthMethod] = useState<'password' | 'publickey'>('password');
-  const [actionLoading, setActionLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState(0);
 
   useEffect(() => {
-    loadUserProfile();
-  }, []);
+    loadUserInfo();
+    
+    // 检查是否需要设置2FA
+    if (searchParams.get('setup2fa') === 'true') {
+      setActiveTab(2); // 切换到2FA设置标签页
+    }
+  }, [searchParams]);
 
-  const loadUserProfile = async () => {
+  const loadUserInfo = async () => {
     try {
-      const userData = JSON.parse(localStorage.getItem('user') || '{}');
-      setUser(userData);
-      setHasKey(!!userData.sshPublicKey);
-      setPublicKey(userData.sshPublicKey || '');
-      setFingerprint(userData.sshKeyFingerprint || '');
-      setGeneratedAt(userData.sshKeyGeneratedAt || '');
-      setAuthMethod(userData.authMethod || 'password');
+      setLoading(true);
+      const userInfo = await authApi.getCurrentUser();
+      setUser(userInfo);
     } catch (error) {
-      console.error('Failed to load user profile:', error);
-      showError(t('common.error'));
+      console.error('加载用户信息失败:', error);
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleGenerateKey = async () => {
-    if (hasKey) {
-      if (!window.confirm(t('profile.confirmRegenerate'))) {
-        return;
-      }
-    }
-
-    setActionLoading(true);
-    try {
-      const response = await userManagementApi.generateSSHKey(user.id);
-      showSuccess(t('profile.keyGenerated'));
-      setPublicKey(response.publicKey);
-      setFingerprint(response.fingerprint);
-      setGeneratedAt(response.generatedAt);
-      setHasKey(true);
-
-      // 提示下载私钥
-      if (window.confirm(t('profile.confirmDownload'))) {
-        await handleDownloadKey();
-      }
-
-      // 更新本地存储的用户信息
-      const updatedUser = { ...user, sshPublicKey: response.publicKey, sshKeyFingerprint: response.fingerprint, sshKeyGeneratedAt: response.generatedAt };
-      localStorage.setItem('user', JSON.stringify(updatedUser));
-      setUser(updatedUser);
-    } catch (err: any) {
-      console.error('生成密钥失败:', err);
-      showError(err.response?.data?.message || t('common.error'));
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleDownloadKey = async () => {
-    try {
-      const blob = await userManagementApi.downloadSSHPrivateKey(user.id);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${user.username}_zjump_ssh_key`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-      showSuccess(t('profile.downloadSuccess'));
-    } catch (err: any) {
-      console.error('下载失败:', err);
-      showError(err.message || t('profile.downloadFailed'));
-    }
-  };
-
-  const handleDeleteKey = async () => {
-    if (!window.confirm(t('profile.confirmDelete'))) {
-      return;
-    }
-
-    setActionLoading(true);
-    try {
-      await userManagementApi.deleteSSHKey(user.id);
-      showSuccess(t('profile.keyDeleted'));
-      setHasKey(false);
-      setPublicKey('');
-      setFingerprint('');
-      setGeneratedAt('');
-
-      // 更新本地存储的用户信息
-      const updatedUser = { ...user, sshPublicKey: '', sshKeyFingerprint: '', sshKeyGeneratedAt: null };
-      localStorage.setItem('user', JSON.stringify(updatedUser));
-      setUser(updatedUser);
-    } catch (err: any) {
-      showError(err.response?.data?.message || t('common.error'));
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-
-  const handleCopyPublicKey = () => {
-    navigator.clipboard.writeText(publicKey);
-    showSuccess(t('profile.publicKeyCopied'));
-  };
-
-  const showSuccess = (message: string) => {
-    // 简单的成功提示（可以替换为更好的Toast组件）
-    alert(' ' + message);
-  };
-
-  const showError = (message: string) => {
-    // 简单的错误提示（可以替换为更好的Toast组件）
-    alert(' ' + message);
   };
 
   if (loading) {
@@ -156,191 +60,141 @@ export default function Profile() {
   }
 
   return (
-    <Container maxWidth="lg">
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" gutterBottom sx={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
-          <PersonIcon fontSize="large" />
-          {t('menu.profile')}
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          {t('profile.subtitle')}
-        </Typography>
+    <Box>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+        <PersonIcon sx={{ fontSize: 40, mr: 2, color: 'primary.main' }} />
+        <Box>
+          <Typography variant="h4" component="h1" fontWeight="700">
+            {t('menu.profile')}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {t('profile.description')}
+          </Typography>
+        </Box>
       </Box>
 
-      {/* 用户信息 */}
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-          {t('profile.basicInfo')}
-        </Typography>
-        <Divider sx={{ mb: 2 }} />
-        <Box sx={{ display: 'grid', gap: 2 }}>
-          <Box>
-            <Typography variant="body2" color="text.secondary">{t('profile.username')}</Typography>
-            <Typography variant="body1" sx={{ fontWeight: 500 }}>{user?.username}</Typography>
-          </Box>
-          <Box>
-            <Typography variant="body2" color="text.secondary">{t('profile.role')}</Typography>
-            <Chip 
-              label={user?.role === 'admin' ? t('profile.admin') : t('profile.user')} 
-              size="small" 
-              color={user?.role === 'admin' ? 'primary' : 'default'}
-            />
-          </Box>
-          <Box>
-            <Typography variant="body2" color="text.secondary">{t('profile.authMethod')}</Typography>
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 0.5 }}>
-              <Chip 
-                label={
-                  authMethod === 'password' ? t('profile.passwordAuth') :
-                  authMethod === 'publickey' ? t('profile.publickeyAuth') :
-                  t('profile.bothAuth')
-                } 
-                size="small" 
-                color="primary"
-                variant="outlined"
-              />
-            </Box>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-              {t('profile.authMethodNote')}
-            </Typography>
-          </Box>
-        </Box>
-      </Paper>
-
-      {/* SSH密钥管理 */}
-      <Paper sx={{ p: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h6" sx={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
-            <KeyIcon />
-            {t('profile.sshKeyManagement')}
+      {/* 2FA设置提示 */}
+      {searchParams.get('setup2fa') === 'true' && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          <Typography variant="body2">
+            <strong>重要提示：</strong>系统已启用全局2FA，您需要设置双因素认证才能正常使用系统。
+            请点击下方的"双因素认证"标签页完成设置。
           </Typography>
-          {hasKey && (
-            <Chip label={t('profile.configured')} color="success" size="small" />
+        </Alert>
+      )}
+
+      <Box sx={{ display: 'flex', gap: 3 }}>
+        {/* 左侧用户信息卡片 */}
+        <Card sx={{ minWidth: 300, height: 'fit-content' }}>
+          <CardContent>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+              <Avatar
+                sx={{ width: 80, height: 80, mr: 2, bgcolor: 'primary.main' }}
+              >
+                {user?.username?.charAt(0).toUpperCase()}
+              </Avatar>
+              <Box>
+                <Typography variant="h6" fontWeight="600">
+                  {user?.fullName || user?.username}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  @{user?.username}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {user?.email}
+                </Typography>
+              </Box>
+            </Box>
+
+            <Divider sx={{ my: 2 }} />
+
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                {t('profile.role')}
+              </Typography>
+              <Typography variant="body2">
+                {user?.role === 'admin' ? t('profile.admin') : t('profile.user')}
+              </Typography>
+            </Box>
+
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                {t('profile.status')}
+              </Typography>
+              <Typography variant="body2" color={user?.status === 'active' ? 'success.main' : 'error.main'}>
+                {user?.status === 'active' ? t('common.active') : t('common.inactive')}
+              </Typography>
+            </Box>
+
+            {user?.lastLoginTime && (
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                  {t('profile.lastLogin')}
+                </Typography>
+                <Typography variant="body2">
+                  {new Date(user.lastLoginTime).toLocaleString()}
+                </Typography>
+              </Box>
+            )}
+
+            {/* 导航按钮 */}
+            <Box sx={{ mt: 3 }}>
+              <Button
+                fullWidth
+                variant={activeTab === 0 ? 'contained' : 'outlined'}
+                startIcon={<PersonIcon />}
+                onClick={() => setActiveTab(0)}
+                sx={{ mb: 1 }}
+              >
+                {t('profile.personalInfo')}
+              </Button>
+              <Button
+                fullWidth
+                variant={activeTab === 1 ? 'contained' : 'outlined'}
+                startIcon={<SecurityIcon />}
+                onClick={() => setActiveTab(1)}
+                sx={{ mb: 1 }}
+              >
+                {t('profile.security')}
+              </Button>
+              <Button
+                fullWidth
+                variant={activeTab === 2 ? 'contained' : 'outlined'}
+                startIcon={<VpnKeyIcon />}
+                onClick={() => setActiveTab(2)}
+              >
+                {t('profile.sshKeys')}
+              </Button>
+            </Box>
+          </CardContent>
+        </Card>
+
+        {/* 右侧内容区域 */}
+        <Box sx={{ flex: 1 }}>
+          {activeTab === 0 && (
+            <PersonalInfoManagement />
+          )}
+
+          {activeTab === 1 && (
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  {t('profile.security')}
+                </Typography>
+                <TwoFactorSettings />
+              </CardContent>
+            </Card>
+          )}
+
+          {activeTab === 2 && (
+            <Card>
+              <CardContent>
+                <SSHKeyManagement />
+              </CardContent>
+            </Card>
           )}
         </Box>
-        <Divider sx={{ mb: 2 }} />
-
-        {!hasKey ? (
-          <Alert severity="info" sx={{ mb: 2 }}>
-            {t('profile.noKeyMessage')}
-          </Alert>
-        ) : (
-          <Alert severity="success" sx={{ mb: 2 }}>
-            {t('profile.keyConfiguredMessage')}
-            <Box sx={{ mt: 1, p: 1, bgcolor: 'rgba(0,0,0,0.05)', borderRadius: 1, fontFamily: 'monospace', fontSize: '0.9rem' }}>
-              ssh -i /path/to/{user?.username}_zjump_ssh_key {user?.username}@your-server -p 2222
-            </Box>
-          </Alert>
-        )}
-
-        <Stack spacing={2}>
-          {/* 密钥信息 */}
-          {hasKey && (
-            <>
-              <Box>
-                <Typography variant="body2" color="text.secondary" gutterBottom>
-                  {t('profile.fingerprint')}
-                </Typography>
-                <Box sx={{ 
-                  p: 1.5, 
-                  bgcolor: 'background.default', 
-                  borderRadius: 1, 
-                  fontFamily: 'monospace',
-                  fontSize: '0.85rem',
-                  wordBreak: 'break-all'
-                }}>
-                  {fingerprint}
-                </Box>
-              </Box>
-
-              <Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
-                  <Typography variant="body2" color="text.secondary">
-                    {t('profile.publicKey')}
-                  </Typography>
-                  <IconButton size="small" onClick={handleCopyPublicKey} title={t('profile.copyPublicKey')}>
-                    <ContentCopyIcon fontSize="small" />
-                  </IconButton>
-                </Box>
-                <Box sx={{ 
-                  p: 1.5, 
-                  bgcolor: 'background.default', 
-                  borderRadius: 1, 
-                  fontFamily: 'monospace',
-                  fontSize: '0.75rem',
-                  wordBreak: 'break-all',
-                  maxHeight: 100,
-                  overflow: 'auto'
-                }}>
-                  {publicKey}
-                </Box>
-              </Box>
-
-              <Box>
-                <Typography variant="body2" color="text.secondary">
-                  {t('profile.generatedTime')}
-                </Typography>
-                <Typography variant="body1">
-                  {generatedAt ? new Date(generatedAt).toLocaleString() : '-'}
-                </Typography>
-              </Box>
-            </>
-          )}
-
-          {/* 操作按钮 */}
-          <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-            {!hasKey ? (
-              <Button
-                variant="contained"
-                startIcon={<RefreshIcon />}
-                onClick={handleGenerateKey}
-                disabled={actionLoading}
-              >
-                {actionLoading ? t('profile.generating') : t('profile.generateKey')}
-              </Button>
-            ) : (
-              <>
-                <Button
-                  variant="outlined"
-                  startIcon={<DownloadIcon />}
-                  onClick={handleDownloadKey}
-                  disabled={actionLoading}
-                >
-                  {t('profile.downloadPrivateKey')}
-                </Button>
-                <Button
-                  variant="outlined"
-                  startIcon={<RefreshIcon />}
-                  onClick={handleGenerateKey}
-                  disabled={actionLoading}
-                >
-                  {t('profile.regenerate')}
-                </Button>
-                <Button
-                  variant="outlined"
-                  color="error"
-                  startIcon={<DeleteIcon />}
-                  onClick={handleDeleteKey}
-                  disabled={actionLoading}
-                >
-                  {t('profile.deleteKey')}
-                </Button>
-              </>
-            )}
-          </Box>
-
-          <Alert severity="warning" sx={{ mt: 2 }}>
-            <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>{t('profile.securityTips')}</Typography>
-            <ul style={{ margin: 0, paddingLeft: 20 }}>
-              <li>{t('profile.tip1')}</li>
-              <li>{t('profile.tip2')}</li>
-              <li>{t('profile.tip3')}</li>
-              <li>{t('profile.tip4')}</li>
-            </ul>
-          </Alert>
-        </Stack>
-      </Paper>
-    </Container>
+      </Box>
+    </Box>
   );
 }
-

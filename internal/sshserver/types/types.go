@@ -43,9 +43,10 @@ type CommandInfo struct {
 
 // AuthResult 认证结果
 type AuthResult struct {
-	Success bool
-	UserID  string
-	Message string
+	Success           bool
+	UserID            string
+	Message           string
+	RequiresTwoFactor bool // 是否需要MFA验证
 }
 
 // Authenticator 认证器接口

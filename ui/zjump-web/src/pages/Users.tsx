@@ -30,6 +30,7 @@ import {
   LockReset as LockResetIcon,
   Search as SearchIcon,
   Refresh as RefreshIcon,
+  Security as SecurityIcon,
 } from '@mui/icons-material';
 import { userManagementApi, User, showSuccessToast } from '../api/api';
 import { useTranslation } from 'react-i18next';
@@ -44,6 +45,7 @@ export default function Users() {
   const [loading, setLoading] = useState(false);
   const [openDialog, setOpenDialog] = useState(false);
   const [openPasswordDialog, setOpenPasswordDialog] = useState(false);
+  const [openReset2FADialog, setOpenReset2FADialog] = useState(false);
   const [dialogMode, setDialogMode] = useState<'create' | 'edit'>('create');
   const [currentUser, setCurrentUser] = useState<Partial<User>>({});
   const [selectedUserId, setSelectedUserId] = useState<string>('');
@@ -63,6 +65,12 @@ export default function Users() {
 
   // 获取当前登录用户
   const currentLoginUser = JSON.parse(localStorage.getItem('user') || '{}');
+  
+  // 调试信息
+  console.log('当前登录用户:', currentLoginUser);
+  console.log('当前用户角色:', currentLoginUser.role);
+  console.log('用户对象的所有属性:', Object.keys(currentLoginUser));
+  console.log('localStorage中的用户数据:', localStorage.getItem('user'));
 
   // 加载用户列表
   const loadUsers = async () => {
@@ -203,6 +211,27 @@ export default function Users() {
     } catch (err: any) {
       console.error('删除失败:', err);
       setError(err.response?.data?.message || '删除失败');
+    }
+  };
+
+  // 打开重置2FA对话框
+  const handleOpenReset2FA = (user: User) => {
+    setCurrentUser(user);
+    setOpenReset2FADialog(true);
+  };
+
+  // 重置用户2FA
+  const handleReset2FA = async () => {
+    if (!currentUser.id) return;
+
+    try {
+      await userManagementApi.resetUser2FA(currentUser.id);
+      showSuccessToast('用户2FA已重置');
+      setOpenReset2FADialog(false);
+      loadUsers();
+    } catch (err: any) {
+      console.error('重置2FA失败:', err);
+      setError(err.response?.data?.message || '重置2FA失败');
     }
   };
 
@@ -397,30 +426,42 @@ export default function Users() {
                       {new Date(user.createdAt).toLocaleString()}
                     </TableCell>
                     <TableCell align="right">
-                      <Tooltip title={t("common.edit")}>
-                        <IconButton size="small" onClick={() => handleOpenEdit(user)}>
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title={t("users.resetPassword")}>
-                        <IconButton
-                          size="small"
-                          onClick={() => handleOpenResetPassword(user.id)}
-                        >
-                          <LockResetIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title={t("common.delete")}>
-                        <span>
+                      <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                        <Tooltip title={t("common.edit")}>
+                          <IconButton size="small" onClick={() => handleOpenEdit(user)}>
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title={t("users.resetPassword")}>
                           <IconButton
                             size="small"
-                            onClick={() => handleDelete(user)}
-                            disabled={user.id === currentLoginUser.id}
+                            onClick={() => handleOpenResetPassword(user.id)}
                           >
-                            <DeleteIcon fontSize="small" />
+                            <LockResetIcon fontSize="small" />
                           </IconButton>
-                        </span>
-                      </Tooltip>
+                        </Tooltip>
+                        {/* 重置2FA按钮 */}
+                        <Tooltip title="重置2FA">
+                          <IconButton
+                            size="small"
+                            onClick={() => handleOpenReset2FA(user)}
+                            color="warning"
+                          >
+                            <SecurityIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title={t("common.delete")}>
+                          <span>
+                            <IconButton
+                              size="small"
+                              onClick={() => handleDelete(user)}
+                              disabled={user.id === currentLoginUser.id}
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      </Box>
                     </TableCell>
                   </TableRow>
                 ))
@@ -571,6 +612,33 @@ export default function Users() {
           <Button onClick={handleClosePasswordDialog}>{t("common.cancel")}</Button>
           <Button onClick={handleResetPassword} variant="contained">
             {t("users.resetPassword")}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 重置2FA对话框 */}
+      <Dialog
+        open={openReset2FADialog}
+        onClose={() => setOpenReset2FADialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>重置用户2FA</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              确定要重置用户 <strong>{currentUser.username}</strong> 的2FA设置吗？
+              <br />
+              此操作将清除用户的2FA密钥和备用码，用户需要重新设置2FA。
+            </Alert>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenReset2FADialog(false)}>
+            取消
+          </Button>
+          <Button onClick={handleReset2FA} color="error" variant="contained">
+            确认重置
           </Button>
         </DialogActions>
       </Dialog>

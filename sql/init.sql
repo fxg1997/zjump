@@ -29,6 +29,13 @@ CREATE TABLE IF NOT EXISTS users (
     auto_disable_on_expiry BOOLEAN DEFAULT TRUE COMMENT 'Auto disable account when expired',
     last_login_time TIMESTAMP NULL COMMENT 'Last login time',
     last_login_ip VARCHAR(45) COMMENT 'Last login IP address',
+    
+    -- 2FA related fields
+    two_factor_enabled BOOLEAN DEFAULT FALSE COMMENT 'Whether 2FA is enabled for this user',
+    two_factor_secret VARCHAR(255) COMMENT '2FA secret key (encrypted)',
+    two_factor_backup_codes TEXT COMMENT '2FA backup codes (JSON array, encrypted)',
+    two_factor_verified_at TIMESTAMP NULL COMMENT 'When 2FA was verified and enabled',
+    
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_username (username),
@@ -56,7 +63,7 @@ CREATE TABLE IF NOT EXISTS hosts (
     os VARCHAR(100) COMMENT 'Operating system',
     cpu VARCHAR(100) COMMENT 'CPU info',
     memory VARCHAR(50) COMMENT 'Memory info',
-    device_type VARCHAR(20) DEFAULT 'linux' COMMENT 'Device type: linux, windows, network, vmware, docker',
+    device_type VARCHAR(20) DEFAULT 'linux' COMMENT 'Device type: linux, windows, vmware, docker, switch, router, firewall, storage, other',
     connection_mode VARCHAR(20) DEFAULT 'auto' COMMENT 'Connection mode: auto, direct, proxy',
     proxy_id VARCHAR(128) COMMENT 'Specific proxy ID when connection_mode=proxy',
     network_zone VARCHAR(50) COMMENT 'Network zone for routing',
@@ -386,7 +393,10 @@ VALUES
     ('2', 'Database Server', '192.168.1.102', 22, 'online', 'CentOS 7.9', 'AMD EPYC 16-core', '64GB', 'linux', 'auto', 'production', '["production","database"]', 'MySQL primary database', 89),
     ('3', 'Test Server 01', '127.0.0.1', 2222, 'online', 'Ubuntu 24.04 LTS', 'Intel Core i7 4-core', '16GB', 'linux', 'auto', 'testing', '["testing","application"]', 'Local test server for development', 0),
     ('4', 'Redis Cache', '192.168.1.103', 22, 'online', 'Debian 11', 'Intel Xeon 4-core', '16GB', 'linux', 'auto', 'production', '["production","cache"]', 'Redis cache cluster node', 45),
-    ('5', 'Dev Server 01', '192.168.3.101', 22, 'offline', 'Ubuntu 22.04 LTS', 'Intel Core i5 4-core', '8GB', 'linux', 'auto', 'development', '["development"]', 'Development test machine', 412)
+    ('5', 'Dev Server 01', '192.168.3.101', 22, 'offline', 'Ubuntu 22.04 LTS', 'Intel Core i5 4-core', '8GB', 'linux', 'auto', 'development', '["development"]', 'Development test machine', 412),
+    ('6', 'Core Switch', '192.168.1.1', 22, 'online', 'Cisco IOS', 'Cisco Catalyst', 'N/A', 'switch', 'auto', 'network', '["network","core"]', 'Core network switch', 23),
+    ('7', 'Firewall', '192.168.1.254', 22, 'online', 'pfSense', 'Intel Atom', '4GB', 'firewall', 'auto', 'security', '["security","firewall"]', 'Network firewall', 67),
+    ('8', 'Storage Server', '192.168.1.200', 22, 'online', 'FreeNAS', 'Intel Xeon 4-core', '16GB', 'storage', 'auto', 'storage', '["storage","nas"]', 'Network attached storage', 12)
 ON DUPLICATE KEY UPDATE name=name;
 
 -- Insert default host groups
@@ -431,7 +441,7 @@ CREATE TABLE IF NOT EXISTS approvals (
     id VARCHAR(36) PRIMARY KEY COMMENT 'Approval unique identifier',
     title VARCHAR(255) NOT NULL COMMENT 'Approval title',
     description TEXT COMMENT 'Approval description',
-    type VARCHAR(50) NOT NULL COMMENT 'Approval type: host_access, host_group_access, command_exec, file_transfer',
+    type VARCHAR(50) NOT NULL COMMENT 'Approval type: host_access, host_group_access',
     status VARCHAR(50) DEFAULT 'pending' COMMENT 'Status: pending, approved, rejected, canceled, expired',
     platform VARCHAR(50) DEFAULT 'internal' COMMENT 'Approval platform: internal, feishu, dingtalk, wechat, custom',
     
@@ -586,6 +596,18 @@ CREATE TABLE IF NOT EXISTS approval_configs (
     
     -- 表单字段映射
     form_fields TEXT COMMENT 'Form field mapping JSON',
+    
+    -- 审批人配置
+    approver_user_ids TEXT COMMENT '审批人用户ID列表(JSON)',
+    
+    -- API配置
+    api_base_url VARCHAR(500) DEFAULT '' COMMENT 'API基础URL，用户自定义填写',
+    api_path VARCHAR(200) DEFAULT '' COMMENT 'API调用路径（创建审批）',
+    api_path_get VARCHAR(200) DEFAULT '' COMMENT '获取审批API路径',
+    api_path_cancel VARCHAR(200) DEFAULT '' COMMENT '取消审批API路径',
+    
+    -- 回调配置
+    callback_url VARCHAR(500) DEFAULT '' COMMENT '回调URL',
     
     -- 时间戳
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'Creation time',
@@ -773,7 +795,7 @@ VALUES
 
 -- Host Monitor Settings
 INSERT IGNORE INTO settings (`key`, `value`, `category`, `type`, `created_at`, `updated_at`) VALUES
-('host_monitor_enabled', 'true', 'host_monitor', 'boolean', NOW(), NOW()),
+('host_monitor_enabled', 'false', 'host_monitor', 'boolean', NOW(), NOW()),
 ('host_monitor_interval', '5', 'host_monitor', 'number', NOW(), NOW()),
 ('host_monitor_method', 'tcp', 'host_monitor', 'string', NOW(), NOW()),
 ('host_monitor_timeout', '3', 'host_monitor', 'number', NOW(), NOW()),
@@ -786,7 +808,6 @@ INSERT IGNORE INTO settings (`key`, `value`, `category`, `type`, `created_at`, `
 -- 插入默认用户组
 INSERT IGNORE INTO user_groups (id, name, description, color, status)
 VALUES
-    ('default-user-group', 'Default Users', 'Default user group for all users', '#1890ff', 'active'),
     (UUID(), 'Administrators', 'Administrator user group', '#f5222d', 'active'),
     (UUID(), 'Developers', 'Developer user group', '#52c41a', 'active');
 
@@ -871,6 +892,27 @@ INSERT IGNORE INTO settings (`key`, `value`, `category`, `type`, `created_at`, `
 ('permission_expiration_auto_disable', 'true', 'expiration', 'boolean', NOW(), NOW()),
 ('expiration_warning_days_user', '7', 'expiration', 'number', NOW(), NOW()),
 ('expiration_warning_days_permission', '3', 'expiration', 'number', NOW(), NOW());
+
+-- ============================================================================
+-- Two-Factor Authentication Tables
+-- ============================================================================
+
+-- 2FA global configuration table
+CREATE TABLE IF NOT EXISTS two_factor_config (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    enabled BOOLEAN DEFAULT FALSE COMMENT 'Whether global 2FA is enabled',
+    issuer VARCHAR(100) DEFAULT 'ZJump' COMMENT '2FA issuer name',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='Global 2FA configuration';
+
+-- Insert default 2FA configuration
+INSERT INTO two_factor_config (enabled, issuer) VALUES (FALSE, 'ZJump')
+ON DUPLICATE KEY UPDATE issuer = 'ZJump';
+
+-- Add indexes for 2FA fields in users table
+ALTER TABLE users ADD INDEX idx_two_factor_enabled (two_factor_enabled);
 
 -- Show created tables
 SELECT 

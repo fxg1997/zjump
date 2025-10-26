@@ -13,23 +13,23 @@ import (
 	"gorm.io/gorm"
 )
 
-// DingTalkProvider 钉钉审批提供者
-type DingTalkProvider struct {
+// WeChatProvider 企业微信审批提供者
+type WeChatProvider struct {
 	config  *model.ApprovalConfig
 	baseURL string
 	client  *http.Client
 	db      *gorm.DB
 }
 
-// NewDingTalkProvider 创建钉钉审批提供者
-func NewDingTalkProvider(config *model.ApprovalConfig, db *gorm.DB) *DingTalkProvider {
+// NewWeChatProvider 创建企业微信审批提供者
+func NewWeChatProvider(config *model.ApprovalConfig, db *gorm.DB) *WeChatProvider {
 	// 使用用户配置的API基础URL，如果没有配置则使用默认值
 	baseURL := config.APIBaseURL
 	if baseURL == "" {
-		baseURL = "https://oapi.dingtalk.com" // 默认值
+		baseURL = "https://qyapi.weixin.qq.com" // 默认值
 	}
 
-	return &DingTalkProvider{
+	return &WeChatProvider{
 		config:  config,
 		baseURL: baseURL,
 		client: &http.Client{
@@ -39,10 +39,10 @@ func NewDingTalkProvider(config *model.ApprovalConfig, db *gorm.DB) *DingTalkPro
 	}
 }
 
-// CreateApproval 创建钉钉审批
-func (p *DingTalkProvider) CreateApproval(ctx context.Context, approval *model.Approval) (string, error) {
+// CreateApproval 创建企业微信审批
+func (p *WeChatProvider) CreateApproval(ctx context.Context, approval *model.Approval) (string, error) {
 	// 检查审批代码是否存在
-	if p.config.ProcessCode == "" {
+	if p.config.TemplateID == "" {
 		return "", fmt.Errorf("审批代码未配置")
 	}
 
@@ -59,9 +59,9 @@ func (p *DingTalkProvider) CreateApproval(ctx context.Context, approval *model.A
 	return p.createApprovalInstance(ctx, token, formContent, approval)
 }
 
-// getAccessToken 获取钉钉访问令牌
-func (p *DingTalkProvider) getAccessToken(ctx context.Context) (string, error) {
-	url := fmt.Sprintf("%s/gettoken?appkey=%s&appsecret=%s", p.baseURL, p.config.AppID, p.config.AppSecret)
+// getAccessToken 获取企业微信访问令牌
+func (p *WeChatProvider) getAccessToken(ctx context.Context) (string, error) {
+	url := fmt.Sprintf("%s/cgi-bin/gettoken?corpid=%s&corpsecret=%s", p.baseURL, p.config.AppID, p.config.AppSecret)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -90,34 +90,34 @@ func (p *DingTalkProvider) getAccessToken(ctx context.Context) (string, error) {
 	}
 
 	if result.ErrCode != 0 {
-		return "", fmt.Errorf("钉钉API错误 [%d]: %s", result.ErrCode, result.ErrMsg)
+		return "", fmt.Errorf("企业微信API错误 [%d]: %s", result.ErrCode, result.ErrMsg)
 	}
 
 	return result.Token, nil
 }
 
 // buildFormContent 构建表单内容
-func (p *DingTalkProvider) buildFormContent(approval *model.Approval) string {
+func (p *WeChatProvider) buildFormContent(approval *model.Approval) string {
 	formData := []map[string]interface{}{
 		{
-			"name":  "title",
+			"title": "工单标题",
 			"value": approval.Title,
 		},
 		{
-			"name":  "description",
+			"title": "详细描述",
 			"value": approval.Description,
 		},
 		{
-			"name":  "reason",
+			"title": "申请理由",
 			"value": approval.Reason,
 		},
 		{
-			"name":  "resources",
+			"title": "申请资源",
 			"value": fmt.Sprintf("%v", approval.ResourceNames),
 		},
 		{
-			"name":  "duration",
-			"value": fmt.Sprintf("%d", approval.Duration),
+			"title": "权限时长",
+			"value": fmt.Sprintf("%d小时", approval.Duration),
 		},
 	}
 
@@ -126,11 +126,11 @@ func (p *DingTalkProvider) buildFormContent(approval *model.Approval) string {
 }
 
 // createApprovalInstance 创建审批实例
-func (p *DingTalkProvider) createApprovalInstance(ctx context.Context, token, formContent string, approval *model.Approval) (string, error) {
+func (p *WeChatProvider) createApprovalInstance(ctx context.Context, token, formContent string, approval *model.Approval) (string, error) {
 	// 使用数据库配置中的API路径，如果没有配置则使用默认路径
 	apiPath := p.config.APIPath
 	if apiPath == "" {
-		apiPath = "/topapi/processinstance/create" // 默认路径
+		apiPath = "/cgi-bin/oa/applyevent" // 默认路径
 	}
 	url := fmt.Sprintf("%s%s?access_token=%s", p.baseURL, apiPath, token)
 
@@ -139,7 +139,6 @@ func (p *DingTalkProvider) createApprovalInstance(ctx context.Context, token, fo
 	if userID == "" {
 		userID = approval.ApplicantName // 如果ApplicantID为空，使用ApplicantName
 	}
-	deptID := "1" // 钉钉默认部门ID，可以根据需要调整
 
 	// 从配置中读取审批人列表
 	var approverIDs []string
@@ -147,16 +146,27 @@ func (p *DingTalkProvider) createApprovalInstance(ctx context.Context, token, fo
 		json.Unmarshal([]byte(p.config.ApproverUserIDs), &approverIDs)
 	}
 
-	reqBody := map[string]interface{}{
-		"process_code":          p.config.ProcessCode,
-		"originator_user_id":    userID,
-		"form_component_values": json.RawMessage(formContent),
-		"dept_id":               deptID,
+	// 构建审批人列表
+	approverList := []map[string]interface{}{}
+	if len(approverIDs) > 0 {
+		for _, approverID := range approverIDs {
+			approverList = append(approverList, map[string]interface{}{
+				"userid": approverID,
+			})
+		}
+	} else {
+		// 如果没有配置审批人，使用申请人作为审批人
+		approverList = append(approverList, map[string]interface{}{
+			"userid": userID,
+		})
 	}
 
-	// 如果配置了审批人，添加到请求体中
-	if len(approverIDs) > 0 {
-		reqBody["approvers"] = approverIDs
+	reqBody := map[string]interface{}{
+		"creator_userid":        userID,
+		"template_id":           p.config.TemplateID,
+		"use_template_approver": 0, // 不使用模板审批人，使用自定义审批人
+		"approver":              approverList,
+		"form_data":             json.RawMessage(formContent),
 	}
 
 	body, _ := json.Marshal(reqBody)
@@ -181,9 +191,7 @@ func (p *DingTalkProvider) createApprovalInstance(ctx context.Context, token, fo
 	var result struct {
 		ErrCode int    `json:"errcode"`
 		ErrMsg  string `json:"errmsg"`
-		Result  struct {
-			ProcessInstanceID string `json:"process_instance_id"`
-		} `json:"result"`
+		SpNo    string `json:"sp_no"`
 	}
 
 	if err := json.Unmarshal(respBody, &result); err != nil {
@@ -191,19 +199,19 @@ func (p *DingTalkProvider) createApprovalInstance(ctx context.Context, token, fo
 	}
 
 	if result.ErrCode != 0 {
-		return "", fmt.Errorf("钉钉API错误 [%d]: %s", result.ErrCode, result.ErrMsg)
+		return "", fmt.Errorf("企业微信API错误 [%d]: %s", result.ErrCode, result.ErrMsg)
 	}
 
-	return result.Result.ProcessInstanceID, nil
+	return result.SpNo, nil
 }
 
 // GetName 获取平台名称
-func (p *DingTalkProvider) GetName() string {
-	return "钉钉"
+func (p *WeChatProvider) GetName() string {
+	return "企业微信"
 }
 
 // GetApprovalStatus 获取审批状态
-func (p *DingTalkProvider) GetApprovalStatus(ctx context.Context, externalID string) (*ApprovalStatusResponse, error) {
+func (p *WeChatProvider) GetApprovalStatus(ctx context.Context, externalID string) (*ApprovalStatusResponse, error) {
 	// 获取访问令牌
 	token, err := p.getAccessToken(ctx)
 	if err != nil {
@@ -214,12 +222,12 @@ func (p *DingTalkProvider) GetApprovalStatus(ctx context.Context, externalID str
 	// 使用数据库配置中的API路径，如果没有配置则使用默认路径
 	apiPathGet := p.config.APIPathGet
 	if apiPathGet == "" {
-		apiPathGet = "/topapi/processinstance/get" // 默认路径
+		apiPathGet = "/cgi-bin/oa/getapprovaldetail" // 默认路径
 	}
 	url := fmt.Sprintf("%s%s?access_token=%s", p.baseURL, apiPathGet, token)
 
 	reqBody := map[string]interface{}{
-		"process_instance_id": externalID,
+		"sp_no": externalID,
 	}
 
 	body, _ := json.Marshal(reqBody)
@@ -244,10 +252,10 @@ func (p *DingTalkProvider) GetApprovalStatus(ctx context.Context, externalID str
 	var result struct {
 		ErrCode int    `json:"errcode"`
 		ErrMsg  string `json:"errmsg"`
-		Result  struct {
-			Status string `json:"status"`
-			Result string `json:"result"`
-		} `json:"result"`
+		Info    struct {
+			Status   string `json:"status"`
+			SpStatus string `json:"sp_status"`
+		} `json:"info"`
 	}
 
 	if err := json.Unmarshal(respBody, &result); err != nil {
@@ -255,20 +263,19 @@ func (p *DingTalkProvider) GetApprovalStatus(ctx context.Context, externalID str
 	}
 
 	if result.ErrCode != 0 {
-		return nil, fmt.Errorf("钉钉API错误 [%d]: %s", result.ErrCode, result.ErrMsg)
+		return nil, fmt.Errorf("企业微信API错误 [%d]: %s", result.ErrCode, result.ErrMsg)
 	}
 
 	// 映射状态
-	status := p.mapStatus(result.Result.Status)
+	status := p.mapStatus(result.Info.SpStatus)
 
 	return &ApprovalStatusResponse{
-		Status:  status,
-		Comment: result.Result.Result,
+		Status: status,
 	}, nil
 }
 
 // CancelApproval 取消审批
-func (p *DingTalkProvider) CancelApproval(ctx context.Context, externalID string) error {
+func (p *WeChatProvider) CancelApproval(ctx context.Context, externalID string) error {
 	// 获取访问令牌
 	token, err := p.getAccessToken(ctx)
 	if err != nil {
@@ -279,13 +286,13 @@ func (p *DingTalkProvider) CancelApproval(ctx context.Context, externalID string
 	// 使用数据库配置中的API路径，如果没有配置则使用默认路径
 	apiPathCancel := p.config.APIPathCancel
 	if apiPathCancel == "" {
-		apiPathCancel = "/topapi/processinstance/cancel" // 默认路径
+		apiPathCancel = "/cgi-bin/oa/applyevent/cancel" // 默认路径
 	}
 	url := fmt.Sprintf("%s%s?access_token=%s", p.baseURL, apiPathCancel, token)
 
 	reqBody := map[string]interface{}{
-		"process_instance_id": externalID,
-		"operator_userid":     p.config.AppID, // 使用应用ID作为操作人
+		"sp_no":  externalID,
+		"userid": p.config.AppID, // 使用应用ID作为操作人
 	}
 
 	body, _ := json.Marshal(reqBody)
@@ -317,34 +324,34 @@ func (p *DingTalkProvider) CancelApproval(ctx context.Context, externalID string
 	}
 
 	if result.ErrCode != 0 {
-		return fmt.Errorf("钉钉API错误 [%d]: %s", result.ErrCode, result.ErrMsg)
+		return fmt.Errorf("企业微信API错误 [%d]: %s", result.ErrCode, result.ErrMsg)
 	}
 
 	return nil
 }
 
 // HandleCallback 处理回调
-func (p *DingTalkProvider) HandleCallback(ctx context.Context, data interface{}) (*CallbackResult, error) {
-	// 钉钉回调处理逻辑
-	return nil, fmt.Errorf("钉钉回调处理未实现")
+func (p *WeChatProvider) HandleCallback(ctx context.Context, data interface{}) (*CallbackResult, error) {
+	// 企业微信回调处理逻辑
+	return nil, fmt.Errorf("企业微信回调处理未实现")
 }
 
 // ValidateConfig 验证配置
-func (p *DingTalkProvider) ValidateConfig(config map[string]interface{}) error {
-	// 验证钉钉配置
+func (p *WeChatProvider) ValidateConfig(config map[string]interface{}) error {
+	// 验证企业微信配置
 	return nil
 }
 
-// mapStatus 映射钉钉状态到系统状态
-func (p *DingTalkProvider) mapStatus(dingTalkStatus string) model.ApprovalStatus {
-	switch dingTalkStatus {
-	case "RUNNING":
+// mapStatus 映射企业微信状态到系统状态
+func (p *WeChatProvider) mapStatus(weChatStatus string) model.ApprovalStatus {
+	switch weChatStatus {
+	case "1": // 审批中
 		return model.ApprovalStatusPending
-	case "COMPLETED":
+	case "2": // 已通过
 		return model.ApprovalStatusApproved
-	case "TERMINATED":
+	case "3": // 已驳回
 		return model.ApprovalStatusRejected
-	case "CANCELED":
+	case "4": // 已撤销
 		return model.ApprovalStatusCanceled
 	default:
 		return model.ApprovalStatusPending

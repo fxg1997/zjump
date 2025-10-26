@@ -104,6 +104,7 @@ export default function Approvals() {
   const [selectedHosts, setSelectedHosts] = useState<any[]>([]);  // 已选择的主机
   const [loadingHosts, setLoadingHosts] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [hasApprovalPermission, setHasApprovalPermission] = useState(false);
 
   // 审批操作对话框
   const [openApproveDialog, setOpenApproveDialog] = useState(false);
@@ -152,9 +153,26 @@ export default function Approvals() {
       const user = await authApi.getCurrentUser();
       console.log('当前用户信息:', user);
       setCurrentUser(user);
+      
+      // 检查用户是否有审批权限（管理员或有待审批工单的用户）
+      await checkApprovalPermission(user.id);
     } catch (error) {
       console.error('获取当前用户失败:', error);
       // 不要立即alert，让用户有机会重试
+    }
+  };
+
+  const checkApprovalPermission = async (userId: string) => {
+    try {
+      // 检查用户是否有待审批的工单，如果有则说明有审批权限
+      const data = await approvalApi.getApprovals({
+        user_id: userId,
+        role: 'approve',
+      });
+      setHasApprovalPermission(data.approvals && data.approvals.length > 0);
+    } catch (error) {
+      console.error('检查审批权限失败:', error);
+      setHasApprovalPermission(false);
     }
   };
 
@@ -195,8 +213,16 @@ export default function Approvals() {
     try {
       setLoading(true);
       let role: 'my' | 'approve' | 'all' = 'my';
-      if (activeTab === 1) role = 'approve';
-      else if (activeTab === 2) role = 'all';
+      
+      // 根据是否有审批权限调整标签页索引
+      if (hasApprovalPermission) {
+        // 有审批权限：0=我的申请, 1=待我审批, 2=全部
+        if (activeTab === 1) role = 'approve';
+        else if (activeTab === 2) role = 'all';
+      } else {
+        // 无审批权限：0=我的申请, 1=全部
+        if (activeTab === 1) role = 'all';
+      }
 
       const data = await approvalApi.getApprovals({
         user_id: currentUser.id,
@@ -414,7 +440,7 @@ export default function Approvals() {
       approved: <DoneIcon />,
       rejected: <CloseIcon />,
       canceled: <CancelIcon />,
-      expired: <AccessTime />,
+      expired: <PendingIcon />,
     };
     return icons[status];
   };
@@ -463,7 +489,7 @@ export default function Approvals() {
       {/* 统计卡片 */}
       {stats && (
         <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
-          <Card sx={{ flex: '1 1 calc(25% - 12px)', minWidth: '200px' }}>
+          <Card sx={{ flex: hasApprovalPermission ? '1 1 calc(25% - 12px)' : '1 1 calc(33.33% - 12px)', minWidth: '200px' }}>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
                 {t('approvals.stats.total')}
@@ -473,7 +499,7 @@ export default function Approvals() {
               </Typography>
             </CardContent>
           </Card>
-          <Card sx={{ flex: '1 1 calc(25% - 12px)', minWidth: '200px' }}>
+          <Card sx={{ flex: hasApprovalPermission ? '1 1 calc(25% - 12px)' : '1 1 calc(33.33% - 12px)', minWidth: '200px' }}>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
                 {t('approvals.stats.pending')}
@@ -483,7 +509,7 @@ export default function Approvals() {
               </Typography>
             </CardContent>
           </Card>
-          <Card sx={{ flex: '1 1 calc(25% - 12px)', minWidth: '200px' }}>
+          <Card sx={{ flex: hasApprovalPermission ? '1 1 calc(25% - 12px)' : '1 1 calc(33.33% - 12px)', minWidth: '200px' }}>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
                 {t('approvals.stats.approved')}
@@ -493,16 +519,18 @@ export default function Approvals() {
               </Typography>
             </CardContent>
           </Card>
-          <Card sx={{ flex: '1 1 calc(25% - 12px)', minWidth: '200px' }}>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                {t('approvals.pendingApprovals')}
-              </Typography>
-              <Typography variant="h4" color="info.main">
-                {stats.pending_approvals || 0}
-              </Typography>
-            </CardContent>
-          </Card>
+          {hasApprovalPermission && (
+            <Card sx={{ flex: '1 1 calc(25% - 12px)', minWidth: '200px' }}>
+              <CardContent>
+                <Typography color="textSecondary" gutterBottom>
+                  {t('approvals.pendingApprovals')}
+                </Typography>
+                <Typography variant="h4" color="info.main">
+                  {stats.pending_approvals || 0}
+                </Typography>
+              </CardContent>
+            </Card>
+          )}
         </Box>
       )}
 
@@ -516,13 +544,15 @@ export default function Approvals() {
               </Badge>
             } 
           />
-          <Tab 
-            label={
-              <Badge badgeContent={stats?.pending_approvals || 0} color="error">
-                {t('approvals.pendingApprovals')}
-              </Badge>
-            } 
-          />
+          {hasApprovalPermission && (
+            <Tab 
+              label={
+                <Badge badgeContent={stats?.pending_approvals || 0} color="error">
+                  {t('approvals.pendingApprovals')}
+                </Badge>
+              } 
+            />
+          )}
           <Tab label={t('approvals.allApprovals')} />
         </Tabs>
 
@@ -544,7 +574,7 @@ export default function Approvals() {
                   <TableRow>
                     <TableCell colSpan={6} align="center" sx={{ py: 8 }}>
                       <Typography color="textSecondary">
-                        {activeTab === 1 
+                        {hasApprovalPermission && activeTab === 1
                           ? t('approvals.messages.noPendingApprovals')
                           : t('approvals.messages.noApprovals')}
                       </Typography>
@@ -557,18 +587,6 @@ export default function Approvals() {
                         <Typography variant="body2" fontWeight="bold">
                           {approval.title}
                         </Typography>
-                        {approval.external_url && (
-                          <Tooltip title={t('approvals.goToExternal')}>
-                            <Link 
-                              href={approval.external_url} 
-                              target="_blank" 
-                              sx={{ display: 'inline-flex', alignItems: 'center', mt: 0.5 }}
-                            >
-                              <ExternalIcon fontSize="small" sx={{ mr: 0.5 }} />
-                              {t('approvals.platforms.' + approval.platform)}
-                            </Link>
-                          </Tooltip>
-                        )}
                       </TableCell>
                       <TableCell>
                         <Chip 
@@ -688,8 +706,6 @@ export default function Approvals() {
               >
                 <MenuItem value="host_access">{t('approvals.types.hostAccess')}</MenuItem>
                 <MenuItem value="host_group_access">{t('approvals.types.hostGroupAccess')}</MenuItem>
-                <MenuItem value="command_exec">{t('approvals.types.commandExec')}</MenuItem>
-                <MenuItem value="file_transfer">{t('approvals.types.fileTransfer')}</MenuItem>
               </Select>
             </FormControl>
 
@@ -814,8 +830,8 @@ export default function Approvals() {
         </DialogTitle>
         <DialogContent dividers>
           {selectedApproval && (
-            <Grid container spacing={3}>
-              <Grid item xs={12}>
+            <Box display="flex" flexDirection="column" gap={3}>
+              <Box>
                 <Typography variant="h6" gutterBottom>
                   {selectedApproval.title}
                 </Typography>
@@ -824,111 +840,101 @@ export default function Approvals() {
                     {selectedApproval.description}
                   </Typography>
                 )}
-              </Grid>
+              </Box>
 
-              <Grid item xs={12} sm={6}>
-                <Typography variant="caption" color="textSecondary">
-                  {t('approvals.approvalType')}
-                </Typography>
-                <Typography>
-                  {t('approvals.types.' + selectedApproval.type)}
-                </Typography>
-              </Grid>
-
-              <Grid item xs={12} sm={6}>
-                <Typography variant="caption" color="textSecondary">
-                  {t('approvals.applicant')}
-                </Typography>
-                <Typography>
-                  {selectedApproval.applicant?.username || selectedApproval.applicant_name}
-                </Typography>
-              </Grid>
-
-              {selectedApproval.resource_names && selectedApproval.resource_names.length > 0 && (
-                <Grid item xs={12}>
-                  <Typography variant="caption" color="textSecondary" display="block" gutterBottom>
-                    {t('approvals.resources')}
-                  </Typography>
-                  <Box display="flex" flexWrap="wrap" gap={0.5}>
-                    {selectedApproval.resource_names.map((name, idx) => (
-                      <Chip key={idx} label={name} size="small" variant="outlined" />
-                    ))}
+              <Box display="flex" flexDirection="column" gap={2}>
+                <Box display="flex" justifyContent="space-between">
+                  <Box>
+                    <Typography variant="caption" color="textSecondary">
+                      {t('approvals.approvalType')}
+                    </Typography>
+                    <Typography>
+                      {t('approvals.types.' + selectedApproval.type)}
+                    </Typography>
                   </Box>
-                </Grid>
-              )}
+                  <Box>
+                    <Typography variant="caption" color="textSecondary">
+                      {t('approvals.applicant')}
+                    </Typography>
+                    <Typography>
+                      {selectedApproval.applicant?.username || selectedApproval.applicant_name}
+                    </Typography>
+                  </Box>
+                </Box>
 
-              {selectedApproval.duration && (
-                <Grid item xs={12} sm={6}>
-                  <Typography variant="caption" color="textSecondary">
-                    {t('approvals.duration')}
-                  </Typography>
-                  <Typography>
-                    {selectedApproval.duration} {t('approvals.form.durationHours')}
-                  </Typography>
-                </Grid>
-              )}
+                {selectedApproval.resource_names && selectedApproval.resource_names.length > 0 && (
+                  <Box>
+                    <Typography variant="caption" color="textSecondary" display="block" gutterBottom>
+                      {t('approvals.resources')}
+                    </Typography>
+                    <Box display="flex" flexWrap="wrap" gap={0.5}>
+                      {selectedApproval.resource_names.map((name, idx) => (
+                        <Chip key={idx} label={name} size="small" variant="outlined" />
+                      ))}
+                    </Box>
+                  </Box>
+                )}
 
-              {selectedApproval.expires_at && (
-                <Grid item xs={12} sm={6}>
-                  <Typography variant="caption" color="textSecondary">
-                    {t('approvals.expirationTime')}
-                  </Typography>
-                  <Typography>
-                    {new Date(selectedApproval.expires_at).toLocaleString()}
-                  </Typography>
-                </Grid>
-              )}
+                <Box display="flex" justifyContent="space-between">
+                  {selectedApproval.duration && (
+                    <Box>
+                      <Typography variant="caption" color="textSecondary">
+                        {t('approvals.duration')}
+                      </Typography>
+                      <Typography>
+                        {selectedApproval.duration} {t('approvals.form.durationHours')}
+                      </Typography>
+                    </Box>
+                  )}
 
-              <Grid item xs={12}>
-                <Divider />
-              </Grid>
+                  {selectedApproval.expires_at && (
+                    <Box>
+                      <Typography variant="caption" color="textSecondary">
+                        {t('approvals.expirationTime')}
+                      </Typography>
+                      <Typography>
+                        {new Date(selectedApproval.expires_at).toLocaleString()}
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+              </Box>
 
-              <Grid item xs={12}>
+              <Divider />
+
+              <Box>
                 <Typography variant="caption" color="textSecondary" display="block" gutterBottom>
                   {t('approvals.reason')}
                 </Typography>
                 <Alert severity="info" sx={{ mt: 1 }}>
                   {selectedApproval.reason}
                 </Alert>
-              </Grid>
+              </Box>
 
               {selectedApproval.approval_note && (
-                <Grid item xs={12}>
+                <Box>
                   <Typography variant="caption" color="textSecondary" display="block" gutterBottom>
                     {t('approvals.approvalNote')}
                   </Typography>
                   <Alert severity="success" sx={{ mt: 1 }}>
                     {selectedApproval.approval_note}
                   </Alert>
-                </Grid>
+                </Box>
               )}
 
               {selectedApproval.reject_reason && (
-                <Grid item xs={12}>
+                <Box>
                   <Typography variant="caption" color="textSecondary" display="block" gutterBottom>
                     {t('approvals.rejectReason')}
                   </Typography>
                   <Alert severity="error" sx={{ mt: 1 }}>
                     {selectedApproval.reject_reason}
                   </Alert>
-                </Grid>
+                </Box>
               )}
 
-              {selectedApproval.external_url && (
-                <Grid item xs={12}>
-                  <Button
-                    variant="outlined"
-                    startIcon={<ExternalIcon />}
-                    href={selectedApproval.external_url}
-                    target="_blank"
-                    fullWidth
-                  >
-                    {t('approvals.goToExternal')}
-                  </Button>
-                </Grid>
-              )}
 
-              <Grid item xs={12}>
+              <Box>
                 <Divider />
                 <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
                   {t('approvals.history')}
@@ -990,10 +996,10 @@ export default function Approvals() {
                     </Typography>
                   )}
                 </List>
-              </Grid>
+              </Box>
 
               {/* 添加评论 */}
-              <Grid item xs={12}>
+              <Box>
                 <Divider sx={{ mb: 2 }} />
                 <TextField
                   fullWidth
@@ -1020,13 +1026,14 @@ export default function Approvals() {
                     ),
                   }}
                 />
-              </Grid>
-            </Grid>
+              </Box>
+            </Box>
           )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setOpenDetailDialog(false)}>{t('common.close')}</Button>
-          {selectedApproval && selectedApproval.status === 'pending' && activeTab === 1 && (
+          {selectedApproval && selectedApproval.status === 'pending' && 
+           hasApprovalPermission && activeTab === 1 && (
             <>
               <Button 
                 onClick={() => setOpenRejectDialog(true)}

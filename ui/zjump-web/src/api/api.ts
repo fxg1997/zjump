@@ -99,14 +99,19 @@ export interface ApprovalComment {
 export interface ApprovalConfig {
   id: string;
   name: string;
-  type: ApprovalType;
-  platform: ApprovalPlatform;
+  type: string; // 平台类型: feishu, dingtalk, wechat
   enabled: boolean;
-  approver_ids?: string[];
-  auto_approve?: boolean;
-  require_reason?: boolean;
-  max_duration?: number;
-  platform_config?: string;
+  app_id: string;
+  app_secret: string;
+  approval_code?: string;
+  process_code?: string;
+  template_id?: string;
+  form_fields: string;
+  approver_user_ids?: string;
+  cc_user_ids?: string;
+  cc_open_ids?: string;
+  api_base_url?: string;
+  callback_url?: string;
   created_at: string;
   updated_at: string;
 }
@@ -318,10 +323,15 @@ export const authApi = {
     }>('/api/auth/methods'),
 
   // 登录
-  login: (username: string, password: string) =>
-    request<{ token: string; user: any }>('/api/auth/login', {
+  login: (username: string, password: string, twoFactorCode?: string, backupCode?: string) =>
+    request<{ token: string; user: any; requiresTwoFactor?: boolean; twoFactorEnabled?: boolean }>('/api/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ 
+        username, 
+        password, 
+        twoFactorCode, 
+        backupCode 
+      }),
     }),
 
   // 登出
@@ -437,6 +447,12 @@ export const userManagementApi = {
     request<{ message: string }>(`/api/user-management/users/${id}/reset-password`, {
       method: 'POST',
       body: JSON.stringify({ password }),
+    }),
+
+  // 重置用户2FA
+  resetUser2FA: (id: string) =>
+    request<{ message: string }>(`/api/admin/two-factor/reset/${id}`, {
+      method: 'POST',
     }),
 
   // 获取用户分组权限

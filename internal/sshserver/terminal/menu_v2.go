@@ -219,8 +219,11 @@ func (m *MenuV2) handleHostSelection(group *types.HostGroupInfo) *types.HostInfo
 			// 下一页
 			m.currentPage++
 			if err := m.loadHostsInGroup(group.ID, m.currentPage); err != nil || len(m.currentHosts) == 0 {
-				m.showError("No more pages")
+				m.showMessage("Already at last page, showing last page:")
 				m.currentPage--
+				if err := m.loadHostsInGroup(group.ID, m.currentPage); err == nil {
+					m.showHostList(group)
+				}
 			} else {
 				m.showHostList(group)
 			}
@@ -233,7 +236,11 @@ func (m *MenuV2) handleHostSelection(group *types.HostGroupInfo) *types.HostInfo
 					m.showHostList(group)
 				}
 			} else {
-				m.showError("Already at first page")
+				// 已经在第一页，重新显示第一页内容
+				m.showMessage("Already at first page, showing first page:")
+				if err := m.loadHostsInGroup(group.ID, 1); err == nil {
+					m.showHostList(group)
+				}
 			}
 
 		case "":
@@ -351,20 +358,16 @@ func (m *MenuV2) showHostList(group *types.HostGroupInfo) {
 	for i, host := range m.currentHosts {
 		// 状态显示
 		statusColor := colorReset
-		statusIcon := ""
 		statusText := host.Status
 		switch strings.ToLower(host.Status) {
 		case "online":
 			statusColor = colorGreen
-			statusIcon = "🟢"
 			statusText = "Online"
 		case "offline":
 			statusColor = colorRed
-			statusIcon = ""
 			statusText = "Offline"
 		default:
 			statusColor = colorYellow
-			statusIcon = "🟡"
 			statusText = host.Status
 		}
 
@@ -378,7 +381,7 @@ func (m *MenuV2) showHostList(group *types.HostGroupInfo) {
 		typeSpace := 8 - len(deviceType)
 		statusSpace := 9 - len(statusText)
 
-		line := colorCyan + colorBold + "║ " + colorYellow + fmt.Sprintf("%3d", i+1) + colorCyan + " │ " + colorWhite + hostname + strings.Repeat(" ", hostSpace) + colorCyan + " │ " + colorWhite + ipAddr + strings.Repeat(" ", ipSpace) + colorCyan + " │ " + colorWhite + deviceType + strings.Repeat(" ", typeSpace) + colorCyan + " │ " + statusColor + statusIcon + statusText + strings.Repeat(" ", statusSpace) + colorCyan + " ║\r\n" + colorReset
+		line := colorCyan + colorBold + "║ " + colorYellow + fmt.Sprintf("%3d", i+1) + colorCyan + " │ " + colorWhite + hostname + strings.Repeat(" ", hostSpace) + colorCyan + " │ " + colorWhite + ipAddr + strings.Repeat(" ", ipSpace) + colorCyan + " │ " + colorWhite + deviceType + strings.Repeat(" ", typeSpace) + colorCyan + " │ " + statusColor + statusText + strings.Repeat(" ", statusSpace) + colorCyan + " ║\r\n" + colorReset
 		output += line
 	}
 
@@ -614,8 +617,9 @@ func (m *MenuV2) ShowReturnToMenu() {
 	msg := "\r\n"
 	msg += colorGreen + "  ✓ " + colorWhite + "Connection closed. Returning to main menu..." + colorReset + "\r\n"
 	m.channel.Write([]byte(msg))
-	// 注意：不在这里显示菜单帮助，避免重复显示
-	// 因为返回后会立即进入 InteractiveMenuV2 主循环，那里会自动显示菜单帮助
+
+	// 立即显示菜单帮助，让用户知道可以做什么
+	m.showMainHelp()
 }
 
 // ShowError 显示错误信息（公开方法，兼容旧接口）
