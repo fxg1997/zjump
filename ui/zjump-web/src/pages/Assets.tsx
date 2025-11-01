@@ -44,7 +44,7 @@ import { mockHosts, useMockData } from '../api/mockData';
 import { hostApi, hostGroupApi, HostGroup } from '../api/api';
 import { useNavigate } from 'react-router-dom';
 import { useTerminal } from '../contexts/TerminalContext';
-import { getDeviceTypeName, getProtocolName } from '../utils/websocket';
+import { getDeviceTypeName } from '../utils/websocket';
 import { useTranslation } from 'react-i18next';
 import FileUploadDialog from '../components/FileUploadDialog';
 import api from '../api';
@@ -76,7 +76,9 @@ export default function Assets() {
     name: '',
     ip: '',
     port: 22,
-    deviceType: 'server',
+    protocol: 'ssh' as Protocol,
+    deviceType: 'server' as DeviceType,
+    username: 'root',
     tags: '',
   });
 
@@ -88,7 +90,8 @@ export default function Assets() {
     name: '',
     ip: '',
     port: 22,
-    deviceType: 'server',
+    protocol: 'ssh' as Protocol,
+    deviceType: 'server' as DeviceType,
     status: 'offline',
     tags: '',
   });
@@ -253,8 +256,9 @@ export default function Assets() {
       name: '',
       ip: '',
       port: 22,
-      protocol: 'ssh',
-      deviceType: 'server',
+      protocol: 'ssh' as Protocol,
+      deviceType: 'server' as DeviceType,
+      username: 'root',
       tags: '',
     });
     setSelectedHostGroupIds([]);
@@ -270,8 +274,9 @@ export default function Assets() {
       name: '',
       ip: '',
       port: 22,
-      protocol: 'ssh',
-      deviceType: 'server',
+      protocol: 'ssh' as Protocol,
+      deviceType: 'server' as DeviceType,
+      username: 'root',
       tags: '',
     });
     setSelectedHostGroupIds([]);
@@ -300,7 +305,9 @@ export default function Assets() {
         name: newHost.name,
         ip: newHost.ip,
         port: newHost.port,
-        deviceType: newHost.deviceType as DeviceType,
+        protocol: newHost.protocol,
+        deviceType: newHost.deviceType,
+        username: newHost.username,
         tags: JSON.stringify(tagsArray), // 转为JSON字符串
         status: 'offline', // 新建主机默认离线
         os: '',
@@ -345,6 +352,7 @@ export default function Assets() {
       name: host.name,
       ip: host.ip,
       port: host.port,
+      protocol: host.protocol,
       deviceType: host.deviceType,
       status: host.status,
       tags: Array.isArray(host.tags) ? host.tags.join(', ') : '',
@@ -382,8 +390,8 @@ export default function Assets() {
       name: '',
       ip: '',
       port: 22,
-      protocol: 'ssh',
-      deviceType: 'server',
+      protocol: 'ssh' as Protocol,
+      deviceType: 'server' as DeviceType,
       status: 'offline',
       tags: '',
     });

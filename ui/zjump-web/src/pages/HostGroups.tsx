@@ -12,21 +12,17 @@ import {
   IconButton,
   Typography,
   Chip,
-  Grid,
   List,
   ListItem,
   ListItemText,
-  ListItemSecondaryAction,
   Divider,
   Alert,
   Checkbox,
-  FormControlLabel,
   Stack,
   Paper,
   Avatar,
   Menu,
   MenuItem,
-  Tooltip,
   Table,
   TableBody,
   TableCell,
@@ -45,7 +41,6 @@ import {
   CheckCircle as OnlineIcon,
   Cancel as OfflineIcon,
   MoreVert as MoreVertIcon,
-  Close as CloseIcon,
   Search as SearchIcon,
   Sort as SortIcon,
 } from '@mui/icons-material';
@@ -79,7 +74,7 @@ export default function HostGroups() {
   const [selectedGroup, setSelectedGroup] = useState<HostGroup | null>(null);
   const [groupHosts, setGroupHosts] = useState<Record<string, Host[]>>({});
   const [allHosts, setAllHosts] = useState<Host[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   
   // View and filter states
   const [searchQuery, setSearchQuery] = useState('');
@@ -87,7 +82,7 @@ export default function HostGroups() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(20);
-  const [selectedTab, setSelectedTab] = useState(0);
+  const [_selectedTab] = useState(0);
   
   // Menu state
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
@@ -395,7 +390,7 @@ export default function HostGroups() {
   const filteredGroups = getFilteredAndSortedGroups();
 
   // 处理分页变化
-  const handleChangePage = (event: unknown, newPage: number) => {
+  const handleChangePage = (_event: unknown, newPage: number) => {
     setPage(newPage);
   };
 
@@ -1028,7 +1023,7 @@ export default function HostGroups() {
                   component="div"
                   count={filteredHosts.length}
                   page={hostPage}
-                  onPageChange={(e, newPage) => setHostPage(newPage)}
+                  onPageChange={(_e, newPage) => setHostPage(newPage)}
                   rowsPerPage={hostRowsPerPage}
                   onRowsPerPageChange={(e) => {
                     setHostRowsPerPage(parseInt(e.target.value, 10));
@@ -1165,7 +1160,7 @@ export default function HostGroups() {
                   component="div"
                   count={filteredHosts.length}
                   page={hostPage}
-                  onPageChange={(e, newPage) => setHostPage(newPage)}
+                  onPageChange={(_e, newPage) => setHostPage(newPage)}
                   rowsPerPage={hostRowsPerPage}
                   onRowsPerPageChange={(e) => {
                     setHostRowsPerPage(parseInt(e.target.value, 10));

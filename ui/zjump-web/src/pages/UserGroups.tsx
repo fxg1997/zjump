@@ -21,16 +21,14 @@ import {
   Chip,
   IconButton,
   Typography,
-  Grid,
   Card,
   CardContent,
   Alert,
   Snackbar,
   Avatar,
   List,
-  ListItem,
+  ListItemButton,
   ListItemText,
-  ListItemSecondaryAction,
   Checkbox,
   Divider,
 } from '@mui/material';
@@ -49,7 +47,7 @@ import { useTranslation } from 'react-i18next';
 const UserGroups: React.FC = () => {
   const { t } = useTranslation();
   const [userGroups, setUserGroups] = useState<UserGroup[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [memberModalVisible, setMemberModalVisible] = useState(false);
   const [editingGroup, setEditingGroup] = useState<UserGroup | null>(null);
@@ -361,8 +359,7 @@ const UserGroups: React.FC = () => {
           <List sx={{ bgcolor: 'background.paper', maxHeight: 400, overflow: 'auto' }}>
             {allUsers.map((user) => (
               <React.Fragment key={user.id}>
-                <ListItem
-                  button
+                <ListItemButton
                   onClick={() => handleToggleUser(user.id)}
                   dense
                 >
@@ -376,7 +373,7 @@ const UserGroups: React.FC = () => {
                     primary={user.username}
                     secondary={user.fullName || user.email || ''}
                   />
-                </ListItem>
+                </ListItemButton>
                 <Divider />
               </React.Fragment>
             ))}

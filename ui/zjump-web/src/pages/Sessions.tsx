@@ -106,7 +106,7 @@ export default function Sessions() {
         }) : '',
         duration: s.duration || '-',
         commandCount: s.commandCount || 0,
-        status: s.status === 'active' ? 'active' : 'closed',
+        status: (s.status === 'active' ? 'active' : 'closed') as 'active' | 'closed',
       }));
       
       setSessions(formattedSessions);

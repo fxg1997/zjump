@@ -73,7 +73,7 @@ export const mockHosts: Host[] = [
     description: '数据中心核心交换机',
     lastLoginTime: '2025-10-09 16:45:00',
     loginCount: 45,
-    deviceType: 'network',
+    deviceType: 'switch',
     protocol: 'ssh',
     createdAt: '2025-03-10 11:00:00',
     updatedAt: '2025-10-09 16:45:00',

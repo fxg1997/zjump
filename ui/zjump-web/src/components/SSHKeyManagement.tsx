@@ -25,7 +25,6 @@ import {
   Refresh as RefreshIcon,
   ContentCopy as CopyIcon,
   CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon,
 } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
 import { userManagementApi, authApi } from '../api/api';
@@ -42,7 +41,6 @@ export default function SSHKeyManagement() {
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [sshKeyInfo, setSSHKeyInfo] = useState<SSHKeyInfo | null>(null);
-  const [showPublicKey, setShowPublicKey] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean;

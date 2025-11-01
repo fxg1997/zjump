@@ -23,21 +23,27 @@ func (r *UserRepository) CreateUser(user *model.User) error {
 }
 
 func (r *UserRepository) FindUserByUsername(username string) (*model.User, error) {
-	var user model.User
-	err := r.db.Where("username = ?", username).First(&user).Error
-	if err != nil {
-		return nil, err
+	var users []model.User
+	result := r.db.Where("username = ?", username).Find(&users)
+	if result.Error != nil {
+		return nil, result.Error
 	}
-	return &user, nil
+	if len(users) == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return &users[0], nil
 }
 
 func (r *UserRepository) FindUserByEmail(email string) (*model.User, error) {
-	var user model.User
-	err := r.db.Where("email = ?", email).First(&user).Error
-	if err != nil {
-		return nil, err
+	var users []model.User
+	result := r.db.Where("email = ?", email).Find(&users)
+	if result.Error != nil {
+		return nil, result.Error
 	}
-	return &user, nil
+	if len(users) == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return &users[0], nil
 }
 
 func (r *UserRepository) FindUserByID(id string) (*model.User, error) {

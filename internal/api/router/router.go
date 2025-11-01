@@ -98,6 +98,7 @@ func Setup(
 		twoFactor := authenticated.Group("/two-factor")
 		{
 			twoFactor.GET("/status", twoFactorHandler.GetUserStatus)
+			twoFactor.GET("/global-status", twoFactorHandler.GetGlobalStatus) // 普通用户可以查看全局MFA状态
 			twoFactor.POST("/setup", twoFactorHandler.SetupTwoFactor)
 			twoFactor.POST("/verify", twoFactorHandler.VerifyTwoFactor)
 			twoFactor.POST("/disable", twoFactorHandler.DisableTwoFactor)

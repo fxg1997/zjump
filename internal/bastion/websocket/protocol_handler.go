@@ -145,7 +145,65 @@ func (h *ProtocolHandler) HandleConnection(c *gin.Context) {
 		UserID:     userID,
 		ProxyID:    h.proxyID,
 		Timeout:    30 * time.Second,
+		Options:    make(map[string]interface{}),
 	}
+
+	// ============================================================================
+	// TODO: 获取 SystemUser 认证信息（RDP/SSH 都需要）
+	// ============================================================================
+	//
+	// 实现步骤：
+	// 1. 从查询参数或请求体中获取 systemUserId
+	//    systemUserId := c.Query("systemUserId")
+	//    或从权限规则中自动选择匹配的 SystemUser
+	//
+	// 2. 查询 SystemUser 信息
+	//    systemUserRepo := repository.NewSystemUserRepository(h.storage.GetDB())
+	//    systemUser, err := systemUserRepo.FindByID(systemUserId)
+	//    if err != nil {
+	//        return fmt.Errorf("system user not found: %w", err)
+	//    }
+	//
+	// 3. 根据协议类型设置认证信息
+	//    if protocolType == protocol.ProtocolRDP {
+	//        // RDP 使用用户名和密码
+	//        config.Username = systemUser.Username
+	//        config.Password = systemUser.Password  // 需要解密
+	//        // Windows 域（如果配置）
+	//        if domain := systemUser.Domain; domain != "" {
+	//            config.Options["domain"] = domain
+	//        }
+	//        // RDP 安全模式
+	//        if systemUser.AuthType == "password" {
+	//            config.Options["security"] = "nla"  // 推荐 NLA
+	//        }
+	//    } else if protocolType == protocol.ProtocolSSH {
+	//        // SSH 可以使用密码或密钥
+	//        config.Username = systemUser.Username
+	//        if systemUser.AuthType == "password" {
+	//            config.Password = systemUser.Password  // 需要解密
+	//        } else if systemUser.AuthType == "key" {
+	//            config.PrivateKey = systemUser.PrivateKey  // 需要解密
+	//            if systemUser.Passphrase != "" {
+	//                config.Options["passphrase"] = systemUser.Passphrase  // 需要解密
+	//            }
+	//        }
+	//    }
+	//
+	// 4. 设置 RDP 特定选项（如果使用 RDP）
+	//    if protocolType == protocol.ProtocolRDP {
+	//        config.Options["width"] = 1920
+	//        config.Options["height"] = 1080
+	//        config.Options["dpi"] = 96
+	//        config.Options["colorDepth"] = 24
+	//        config.Options["enableDrive"] = true  // 启用文件传输
+	//        config.Options["ignoreCert"] = false // 生产环境建议设为 false
+	//    }
+	//
+	// 5. 解密敏感信息（密码、密钥等）
+	//    - 使用配置中的 encrypt_key 解密
+	//    - 参考其他服务中的解密实现
+	//
 
 	// 连接到目标主机
 	ctx := context.Background()

@@ -58,7 +58,7 @@ export default function Users() {
     email: '',
     fullName: '',
     role: 'user' as 'admin' | 'user',
-    authMethod: 'password' as 'password' | 'publickey',
+    authMethod: 'password' as 'password' | 'publickey' | 'both',
     expiresAt: '',
     autoDisableOnExpiry: true,
   });
@@ -123,13 +123,15 @@ export default function Users() {
   const handleOpenEdit = (user: User) => {
     setDialogMode('edit');
     setCurrentUser(user);
+    // Handle 'both' authMethod by defaulting to 'password' for form
+    const authMethod = user.authMethod === 'both' ? 'password' : (user.authMethod || 'password');
     setFormData({
       username: user.username,
       password: '',
       email: user.email || '',
       fullName: user.fullName || '',
       role: user.role,
-      authMethod: user.authMethod || 'password',
+      authMethod: authMethod as 'password' | 'publickey' | 'both',
       expiresAt: user.expiresAt ? user.expiresAt.substring(0, 16) : '', // 格式化为 datetime-local
       autoDisableOnExpiry: user.autoDisableOnExpiry !== undefined ? user.autoDisableOnExpiry : true,
     });
@@ -180,7 +182,7 @@ export default function Users() {
         
         // 如果认证方式改变了，单独更新认证方式
         if (formData.authMethod !== currentUser.authMethod) {
-          await userManagementApi.updateUserAuthMethod(currentUser.id!, formData.authMethod);
+          await userManagementApi.updateUserAuthMethod(currentUser.id!, formData.authMethod as 'password' | 'publickey' | 'both');
         }
         
         showSuccessToast('用户更新成功');
@@ -381,7 +383,7 @@ export default function Users() {
                     <TableCell>
                       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, maxWidth: 300 }}>
                         {user.userGroups && user.userGroups.length > 0 ? (
-                          user.userGroups.map((group) => (
+                          user.userGroups.map((group: { id: string; name: string }) => (
                             <Chip key={group.id} label={group.name} size="small" color="secondary" />
                           ))
                         ) : (
@@ -483,7 +485,9 @@ export default function Users() {
           }}
           labelRowsPerPage={`${t("common.rowsPerPage")}:`}
           labelDisplayedRows={({ from, to, count }) =>
-            t("common.displayedRows", { from, to, count: count !== -1 ? count : `${to}+` })
+            count !== -1 
+              ? t("common.displayedRows", { from, to, count: count as number })
+              : t("common.displayedRowsMore", { from, to })
           }
         />
       </Paper>
@@ -545,13 +549,14 @@ export default function Users() {
               select
               value={formData.authMethod}
               onChange={(e) =>
-                setFormData({ ...formData, authMethod: e.target.value as 'password' | 'publickey' })
+                setFormData({ ...formData, authMethod: e.target.value as 'password' | 'publickey' | 'both' })
               }
               fullWidth
               helperText={t("users.authMethodHelper")}
             >
               <MenuItem value="password">{t("users.authPassword")}</MenuItem>
               <MenuItem value="publickey">{t("users.authPublickey")}</MenuItem>
+              <MenuItem value="both">密码和密钥</MenuItem>
             </TextField>
             <TextField
               label="过期时间"

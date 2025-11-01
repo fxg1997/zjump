@@ -21,9 +21,11 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { authApi } from '../api/api';
+import axiosInstance from '../api/request';
 import { useSettings } from '../contexts/SettingsContext';
 import { useTranslation } from 'react-i18next';
 import TwoFactorVerification from '../components/TwoFactorVerification';
+import ForceMfaSetup from '../components/ForceMfaSetup';
 
 type AuthMethod = 'password' | 'ldap' | 'sso';
 
@@ -47,6 +49,9 @@ export default function Login() {
   const [showTwoFactor, setShowTwoFactor] = useState(false);
   const [twoFactorError, setTwoFactorError] = useState('');
   const [pendingLoginData, setPendingLoginData] = useState<{username: string, password: string} | null>(null);
+  const [showForceMfaSetup, setShowForceMfaSetup] = useState(false);
+  const [forceMfaToken, setForceMfaToken] = useState('');
+  const [pendingUser, setPendingUser] = useState<any | null>(null);
   
   const navigate = useNavigate();
   const { settings } = useSettings();
@@ -114,7 +119,12 @@ export default function Login() {
     try {
       const result = await authApi.login(username, password);
       
-      // 检查是否需要2FA验证
+      // 添加调试日志
+      console.log('Login result:', result);
+      console.log('needsTwoFactorSetup:', result.needsTwoFactorSetup);
+      console.log('requiresTwoFactor:', result.requiresTwoFactor);
+      
+      // 检查是否需要2FA验证（用户已开启2FA → 直接进验证码页面）
       if (result.requiresTwoFactor) {
         setPendingLoginData({ username, password });
         setShowTwoFactor(true);
@@ -122,13 +132,30 @@ export default function Login() {
         return;
       }
       
-      // 检查是否需要设置2FA
+      // 检查是否需要设置2FA（双重确认：如果用户已经开启过，就不再进入扫码页）
       if (result.needsTwoFactorSetup) {
-        // 用户需要设置2FA，先登录然后跳转到设置页面
-        localStorage.setItem('token', result.token);
-        localStorage.setItem('user', JSON.stringify(result.user));
-        // 跳转到个人设置页面，并显示2FA设置提示
-        navigate('/profile?setup2fa=true');
+        console.log('Global MFA enabled, verifying whether user already enabled 2FA...');
+        try {
+          const statusRes = await axiosInstance.get('/api/two-factor/status', {
+            headers: { Authorization: `Bearer ${result.token}` },
+          });
+          const alreadyEnabled = !!statusRes.data?.data?.enabled;
+          if (alreadyEnabled) {
+            // 用户已开启过2FA：进入验证码验证流程（更安全，符合全局MFA要求）
+            setPendingLoginData({ username, password });
+            setShowTwoFactor(true);
+            setLoading(false);
+            return;
+          }
+        } catch (e) {
+          // 忽略检查失败，按需要设置流程走
+        }
+
+        console.log('Global MFA enabled, user must setup MFA (not enabled yet)');
+        setForceMfaToken(result.token);
+        setPendingUser(result.user);
+        setShowForceMfaSetup(true);
+        setLoading(false);
         return;
       }
       
@@ -161,7 +188,12 @@ export default function Login() {
       localStorage.setItem('user', JSON.stringify(result.user));
       navigate('/');
     } catch (err: any) {
-      setTwoFactorError(err.message || t('login.twoFactorFailed'));
+      const status = err?.response?.status;
+      if (status === 401) {
+        setTwoFactorError(t('auth.twoFactor.invalidCode'));
+      } else {
+        setTwoFactorError(err.response?.data?.message || err.message || t('login.twoFactorFailed'));
+      }
     } finally {
       setLoading(false);
     }
@@ -171,6 +203,25 @@ export default function Login() {
     setShowTwoFactor(false);
     setPendingLoginData(null);
     setTwoFactorError('');
+  };
+
+  const handleForceMfaSetupComplete = async () => {
+    // MFA设置完成，保存token，然后获取完整用户信息
+    localStorage.setItem('token', forceMfaToken);
+    try {
+      const me = await axiosInstance.get('/api/auth/me', {
+        headers: { Authorization: `Bearer ${forceMfaToken}` },
+      });
+      localStorage.setItem('user', JSON.stringify(me.data?.data || pendingUser || {}));
+    } catch (e) {
+      // 退化：如果 /me 获取失败，至少使用之前的用户信息
+      if (pendingUser) {
+        localStorage.setItem('user', JSON.stringify(pendingUser));
+      }
+    }
+    setShowForceMfaSetup(false);
+    setForceMfaToken('');
+    navigate('/');
   };
 
   const handleSSOLogin = async () => {
@@ -602,6 +653,17 @@ export default function Login() {
           </Typography>
         </Box>
       </Container>
+      
+      {/* 强制MFA设置对话框 */}
+      <ForceMfaSetup
+        open={showForceMfaSetup}
+        onComplete={handleForceMfaSetupComplete}
+        onCancel={() => {
+          setShowForceMfaSetup(false);
+          setForceMfaToken('');
+        }}
+        token={forceMfaToken}
+      />
     </Box>
   );
 }

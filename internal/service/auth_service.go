@@ -56,13 +56,25 @@ func NewAuthService(repo *repository.UserRepository, settingRepo *repository.Set
 // Register 用户注册
 func (s *AuthService) Register(req *model.RegisterRequest) (*model.User, error) {
 	// 检查用户名是否已存在
-	if _, err := s.repo.FindUserByUsername(req.Username); err == nil {
+	if _, err := s.repo.FindUserByUsername(req.Username); err != nil {
+		// 如果是记录不存在错误，说明用户名可用，继续
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("检查用户名失败: %w", err)
+		}
+	} else {
+		// 用户已存在
 		return nil, errors.New("用户名已存在")
 	}
 
 	// 检查邮箱是否已存在
 	if req.Email != "" {
-		if _, err := s.repo.FindUserByEmail(req.Email); err == nil {
+		if _, err := s.repo.FindUserByEmail(req.Email); err != nil {
+			// 如果是记录不存在错误，说明邮箱可用，继续
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, fmt.Errorf("检查邮箱失败: %w", err)
+			}
+		} else {
+			// 邮箱已被使用
 			return nil, errors.New("邮箱已被使用")
 		}
 	}
@@ -444,13 +456,25 @@ func (s *AuthService) GetUsersWithPagination(page, pageSize int, keyword string)
 // CreateUser 创建新用户（管理员功能）
 func (s *AuthService) CreateUser(req *model.RegisterRequest, role string, authMethod string) (*model.User, error) {
 	// 检查用户名是否已存在
-	if _, err := s.repo.FindUserByUsername(req.Username); err == nil {
+	if _, err := s.repo.FindUserByUsername(req.Username); err != nil {
+		// 如果是记录不存在错误，说明用户名可用，继续
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("检查用户名失败: %w", err)
+		}
+	} else {
+		// 用户已存在
 		return nil, errors.New("用户名已存在")
 	}
 
 	// 检查邮箱是否已存在
 	if req.Email != "" {
-		if _, err := s.repo.FindUserByEmail(req.Email); err == nil {
+		if _, err := s.repo.FindUserByEmail(req.Email); err != nil {
+			// 如果是记录不存在错误，说明邮箱可用，继续
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, fmt.Errorf("检查邮箱失败: %w", err)
+			}
+		} else {
+			// 邮箱已被使用
 			return nil, errors.New("邮箱已被使用")
 		}
 	}

@@ -15,7 +15,6 @@ import {
   Person as PersonIcon,
   Security as SecurityIcon,
   VpnKey as VpnKeyIcon,
-  Settings as SettingsIcon,
 } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
 import { authApi } from '../api/api';
@@ -35,7 +34,7 @@ export default function Profile() {
     
     // 检查是否需要设置2FA
     if (searchParams.get('setup2fa') === 'true') {
-      setActiveTab(2); // 切换到2FA设置标签页
+      setActiveTab(1); // 切换到Security标签页（包含2FA设置）
     }
   }, [searchParams]);
 

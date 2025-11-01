@@ -11,8 +11,6 @@ import {
   MenuItem,
   FormControl,
   InputLabel,
-  Switch,
-  FormControlLabel,
   Table,
   TableBody,
   TableCell,
@@ -23,7 +21,6 @@ import {
   Chip,
   IconButton,
   Typography,
-  Grid,
   Card,
   CardContent,
   Alert,
@@ -43,7 +40,7 @@ import { useTranslation } from 'react-i18next';
 const SystemUsers: React.FC = () => {
   const { t } = useTranslation();
   const [systemUsers, setSystemUsers] = useState<SystemUser[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingSystemUser, setEditingSystemUser] = useState<SystemUser | null>(null);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' });

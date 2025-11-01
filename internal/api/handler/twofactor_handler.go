@@ -45,6 +45,31 @@ func (h *TwoFactorHandler) GetGlobalConfig(c *gin.Context) {
 	})
 }
 
+// GetGlobalStatus 获取全局2FA状态（普通用户可访问，只读）
+func (h *TwoFactorHandler) GetGlobalStatus(c *gin.Context) {
+	var config model.TwoFactorConfig
+	if err := h.db.First(&config).Error; err != nil {
+		// 如果不存在，返回默认配置
+		config = model.TwoFactorConfig{
+			Enabled: false,
+			Issuer:  "ZJump",
+		}
+	}
+
+	// 只返回状态信息，不包含敏感配置
+	status := struct {
+		Enabled bool `json:"enabled"`
+	}{
+		Enabled: config.Enabled,
+	}
+
+	c.JSON(http.StatusOK, model.Response{
+		Code:    http.StatusOK,
+		Message: "Success",
+		Data:    status,
+	})
+}
+
 // UpdateGlobalConfig 更新全局2FA配置
 func (h *TwoFactorHandler) UpdateGlobalConfig(c *gin.Context) {
 	var req struct {
@@ -86,20 +111,7 @@ func (h *TwoFactorHandler) UpdateGlobalConfig(c *gin.Context) {
 		return
 	}
 
-	// 如果全局禁用2FA，强制所有用户禁用2FA
-	if !req.Enabled {
-		if err := h.db.Model(&model.User{}).Where("two_factor_enabled = ?", true).Updates(map[string]interface{}{
-			"two_factor_enabled":      false,
-			"two_factor_secret":       "",
-			"two_factor_backup_codes": "",
-			"two_factor_verified_at":  nil,
-		}).Error; err != nil {
-			fmt.Printf("强制禁用所有用户2FA失败: %v\n", err)
-			// 不返回错误，因为配置已经保存成功
-		} else {
-			fmt.Printf("已强制禁用所有用户的2FA\n")
-		}
-	}
+	// 注意：关闭全局2FA不再清空用户个人2FA设置，避免意外重置
 
 	c.JSON(http.StatusOK, model.Response{
 		Code:    http.StatusOK,
@@ -172,15 +184,7 @@ func (h *TwoFactorHandler) SetupTwoFactor(c *gin.Context) {
 		return
 	}
 
-	// 检查用户权限，只有管理员可以启用2FA
-	if user.Role != "admin" {
-		c.JSON(http.StatusForbidden, model.Response{
-			Code:    http.StatusForbidden,
-			Message: "只有管理员可以启用2FA",
-			Data:    nil,
-		})
-		return
-	}
+	// 允许任意已认证用户为自己的账户设置2FA
 
 	// 如果已经启用2FA，返回错误
 	if user.TwoFactorEnabled {
@@ -281,15 +285,7 @@ func (h *TwoFactorHandler) VerifyTwoFactor(c *gin.Context) {
 		return
 	}
 
-	// 检查用户权限，只有管理员可以启用2FA
-	if user.Role != "admin" {
-		c.JSON(http.StatusForbidden, model.Response{
-			Code:    http.StatusForbidden,
-			Message: "只有管理员可以启用2FA",
-			Data:    nil,
-		})
-		return
-	}
+	// 允许任意已认证用户为自己的账户启用2FA
 
 	// 验证TOTP代码
 	valid := h.twoFactorSvc.ValidateCode(req.Secret, req.Code)

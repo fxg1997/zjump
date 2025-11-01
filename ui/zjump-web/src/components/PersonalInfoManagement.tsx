@@ -6,13 +6,9 @@ import {
   CardContent,
   Alert,
   Stack,
-  Divider,
   Chip,
   CircularProgress,
 } from '@mui/material';
-import {
-  CheckCircle as CheckCircleIcon,
-} from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
 import { authApi } from '../api/api';
 
@@ -34,7 +30,6 @@ export default function PersonalInfoManagement() {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [userInfo, setUserInfo] = useState<PersonalInfo | null>(null);
-  const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -106,11 +101,6 @@ export default function PersonalInfoManagement() {
         {t('profile.personalInfo')}
       </Typography>
 
-      {success && (
-        <Alert severity="success" sx={{ mb: 2 }} icon={<CheckCircleIcon />}>
-          {t('profile.saveSuccess')}
-        </Alert>
-      )}
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>

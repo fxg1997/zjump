@@ -45,7 +45,6 @@ import {
 import { useTerminal } from '../contexts/TerminalContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { useTheme as useCustomTheme } from '../contexts/ThemeContext';
-import { authApi } from '../api/api';
 import { useTranslation } from 'react-i18next';
 
 const drawerWidth = 240; // Web 优化：减小侧边栏宽度

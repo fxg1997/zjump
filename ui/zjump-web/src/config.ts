@@ -38,17 +38,27 @@ const developmentConfig: AppConfig = {
 };
 
 // 生产环境配置
-const productionConfig: AppConfig = {
-  useNginx: true,
-  apiUrl: 'https://your-domain.com',  // 不包含 /api，由各个 API 定义中添加
-  linuxProxyUrl: 'https://your-domain.com',
-  nginxWsUrl: 'wss://your-domain.com',
-  proxyPorts: {
-    linux: 8022,
-    windows: 8033,
-    network: 8044,
-  },
+// 在 Docker 环境中，前端和 API 通过 Nginx 在同一域名下，使用相对路径
+const getProductionConfig = (): AppConfig => {
+  // 运行时获取当前协议和域名
+  const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+  const host = typeof window !== 'undefined' ? window.location.host : '';
+  
+  return {
+    useNginx: true,
+    // 使用相对路径，自动使用当前域名（适用于 Docker 部署）
+    apiUrl: '',  // 空字符串表示使用当前域名，Nginx 会代理 /api/* 到后端
+    linuxProxyUrl: '',  // 使用当前域名
+    nginxWsUrl: protocol + host,  // WebSocket 使用当前域名
+    proxyPorts: {
+      linux: 8022,
+      windows: 8033,
+      network: 8044,
+    },
+  };
 };
+
+const productionConfig = getProductionConfig();
 
 // 根据环境选择配置
 const config: AppConfig = import.meta.env.MODE === 'production' 

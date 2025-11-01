@@ -39,6 +39,7 @@
     "noData": "No data",
     "totalRecords": "Total {{count}} records",
     "displayedRows": "{{from}}-{{to}} of {{count}}",
+    "displayedRowsMore": "{{from}}-{{to}} of {{to}}",
     "completed": "Completed",
     "inProgress": "In Progress",
     "name": "Name",
@@ -201,6 +202,7 @@
       "backupCodeHelper": "Please enter your backup code",
       "useBackupCode": "Use Backup Code",
       "verify": "Verify",
+      "invalidCode": "Invalid code, please try again",
       "needHelp": "Need help?"
     }
   },
@@ -932,7 +934,8 @@
     },
     "pagination": {
       "rowsPerPage": "Rows per page:",
-      "displayedRows": "{{from}}-{{to}} of {{count}}"
+      "displayedRows": "{{from}}-{{to}} of {{count}}",
+      "displayedRowsMore": "{{from}}-{{to}} of {{to}}"
     },
     "messages": {
       "createSuccess": "Group created successfully",

@@ -19,7 +19,6 @@ import {
   Paper,
   IconButton,
   Chip,
-  Grid,
   MenuItem,
   Select,
   FormControl,
@@ -31,7 +30,6 @@ import {
   Badge,
   Alert,
   Divider,
-  Link,
   List,
   ListItem,
   ListItemAvatar,
@@ -47,7 +45,6 @@ import {
   Delete as CancelIcon,
   Visibility as ViewIcon,
   Comment as CommentIcon,
-  OpenInNew as ExternalIcon,
   AccessTime as PendingIcon,
   Done as DoneIcon,
   Close as CloseIcon,
@@ -55,9 +52,6 @@ import {
 import { 
   approvalApi,
   authApi,
-  hostApi,
-  hostGroupApi,
-  userApi,
   showSuccessToast,
   Approval, 
   ApprovalComment,
@@ -71,7 +65,7 @@ export default function Approvals() {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState(0); // 0: 我的申请, 1: 待我审批, 2: 全部
   const [approvals, setApprovals] = useState<Approval[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [openCreateDialog, setOpenCreateDialog] = useState(false);
   const [openDetailDialog, setOpenDetailDialog] = useState(false);
   const [selectedApproval, setSelectedApproval] = useState<Approval | null>(null);
@@ -940,7 +934,7 @@ export default function Approvals() {
                   {t('approvals.history')}
                 </Typography>
                 <List sx={{ mt: 2 }}>
-                  {comments.map((comment, index) => (
+                  {comments.map((comment) => (
                     <ListItem 
                       key={comment.id}
                       alignItems="flex-start"

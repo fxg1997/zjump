@@ -219,6 +219,7 @@ export default function TwoFactorSettings({ showGlobalConfig = false }: TwoFacto
   const [showBackupCodes, setShowBackupCodes] = useState(false);
   const [qrCodeRefreshTime, setQrCodeRefreshTime] = useState<number | null>(null);
   const [timeUntilRefresh, setTimeUntilRefresh] = useState<number>(0);
+  const [globalConfig, setGlobalConfig] = useState({ enabled: false });
 
   useEffect(() => {
     loadData();
@@ -255,15 +256,17 @@ export default function TwoFactorSettings({ showGlobalConfig = false }: TwoFacto
   const loadData = async () => {
     try {
       setLoading(true);
-      const [userRes, statusRes] = await Promise.all([
+      const [userRes, statusRes, globalConfigRes] = await Promise.all([
         axiosInstance.get('/api/auth/me'),
         axiosInstance.get('/api/two-factor/status'),
+        axiosInstance.get('/api/two-factor/global-status').catch(() => ({ data: { data: { enabled: false } } }))
       ]);
       console.log('用户角色:', userRes.data?.data?.role);
       
       // 使用正确的数据结构
       setUser(userRes.data.data);
       setUserStatus(statusRes.data.data);
+      setGlobalConfig(globalConfigRes.data.data);
     } catch (error) {
       console.error('加载2FA数据失败:', error);
     } finally {
@@ -458,6 +461,16 @@ export default function TwoFactorSettings({ showGlobalConfig = false }: TwoFacto
             <GlobalTwoFactorConfig />
           </CardContent>
         </Card>
+      )}
+
+      {/* 全局MFA强制提示 - 只在全局MFA开启且用户未设置MFA时显示 */}
+      {globalConfig.enabled && !userStatus?.enabled && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          <Typography variant="body2">
+            <strong>重要提示：</strong>系统已启用全局2FA，您必须设置双因素认证才能正常使用系统。
+            请立即设置2FA以避免登录问题。
+          </Typography>
+        </Alert>
       )}
 
       {/* 用户2FA状态 */}

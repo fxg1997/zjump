@@ -101,14 +101,13 @@ export function getDeviceIcon(deviceType: DeviceType): string {
   const icons: Record<DeviceType, string> = {
     linux: 'Computer',
     windows: 'DesktopWindows',
-    network: 'Router',
     vmware: 'Cloud',
     docker: 'ViewInAr',
-    server: 'Storage',
     switch: 'Hub',
     router: 'Router',
     firewall: 'Security',
     other: 'DeviceUnknown',
+    storage: 'Storage',
   };
   return icons[deviceType] || 'Computer';
 }

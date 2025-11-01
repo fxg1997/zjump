@@ -23,7 +23,6 @@ import {
   Chip,
   IconButton,
   Typography,
-  Grid,
   Card,
   CardContent,
   Alert,
@@ -47,7 +46,7 @@ import { useTranslation } from 'react-i18next';
 const PermissionRules: React.FC = () => {
   const { t } = useTranslation();
   const [rules, setRules] = useState<PermissionRule[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingRule, setEditingRule] = useState<PermissionRule | null>(null);
   const [userGroups, setUserGroups] = useState<UserGroup[]>([]);

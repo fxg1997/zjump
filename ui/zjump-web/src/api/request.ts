@@ -54,11 +54,15 @@ axiosInstance.interceptors.response.use(
       
       switch (status) {
         case 401:
+          // 对登录接口的401特殊处理：不要跳转，由页面自行处理重试/错误显示
+          if (error.config && typeof error.config.url === 'string' && error.config.url.includes('/api/auth/login')) {
+            // 直接透传错误，不做全局跳转
+            break;
+          }
           // 未授权，清除token并跳转到登录页
           showErrorToast('登录已过期，请重新登录');
           localStorage.removeItem('token');
           localStorage.removeItem('user');
-          // 延迟跳转，让用户看到提示
           setTimeout(() => {
             window.location.href = '/login';
           }, 1500);

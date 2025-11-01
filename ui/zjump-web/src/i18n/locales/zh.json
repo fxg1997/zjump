@@ -39,6 +39,7 @@
     "noData": "暂无数据",
     "totalRecords": "共 {{count}} 条记录",
     "displayedRows": "{{from}}-{{to}} 共 {{count}}",
+    "displayedRowsMore": "{{from}}-{{to}} of more than {{to}}",
     "completed": "已结束",
     "inProgress": "进行中",
     "name": "名称",
@@ -201,6 +202,7 @@
       "backupCodeHelper": "请输入您的备用码",
       "useBackupCode": "使用备用码",
       "verify": "验证",
+      "invalidCode": "验证码错误，请重试",
       "needHelp": "需要帮助？"
     }
   },
@@ -932,7 +934,8 @@
     },
     "pagination": {
       "rowsPerPage": "每页显示:",
-      "displayedRows": "{{from}}-{{to}} / 共 {{count}} 条"
+      "displayedRows": "{{from}}-{{to}} / 共 {{count}} 条",
+      "displayedRowsMore": "{{from}}-{{to}} of more than {{to}}"
     },
     "messages": {
       "createSuccess": "分组创建成功",

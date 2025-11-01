@@ -324,7 +324,7 @@ export const authApi = {
 
   // 登录
   login: (username: string, password: string, twoFactorCode?: string, backupCode?: string) =>
-    request<{ token: string; user: any; requiresTwoFactor?: boolean; twoFactorEnabled?: boolean }>('/api/auth/login', {
+    request<{ token: string; user: any; requiresTwoFactor?: boolean; twoFactorEnabled?: boolean; needsTwoFactorSetup?: boolean }>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ 
         username, 
@@ -382,6 +382,9 @@ export interface User {
   sshKeyFingerprint?: string;
   createdAt: string;
   updatedAt: string;
+  expiresAt?: string;
+  autoDisableOnExpiry?: boolean;
+  userGroups?: { id: string; name: string }[];
 }
 
 export const userManagementApi = {
@@ -409,6 +412,9 @@ export const userManagementApi = {
     email: string;
     fullName: string;
     role: 'admin' | 'user';
+    authMethod?: 'password' | 'publickey' | 'both';
+    expiresAt?: string;
+    autoDisableOnExpiry?: boolean;
   }) =>
     request<User>('/api/user-management/users', {
       method: 'POST',
@@ -558,7 +564,7 @@ export const userManagementApi = {
     return response.blob();
   },
 
-  updateUserAuthMethod: (id: string, authMethod: 'password' | 'publickey') =>
+  updateUserAuthMethod: (id: string, authMethod: 'password' | 'publickey' | 'both') =>
     request<{ message: string }>(`/api/user-management/users/${id}/auth-method`, {
       method: 'PUT',
       body: JSON.stringify({ authMethod }),

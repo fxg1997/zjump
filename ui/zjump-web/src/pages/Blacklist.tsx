@@ -42,7 +42,7 @@ import { useTranslation } from 'react-i18next';
 export default function Blacklist() {
   const { t } = useTranslation();
   const [rules, setRules] = useState<BlacklistRule[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [openDialog, setOpenDialog] = useState(false);
   const [users, setUsers] = useState<any[]>([]);
   const [newRule, setNewRule] = useState<Partial<BlacklistRule>>({
