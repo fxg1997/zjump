@@ -156,13 +156,38 @@ export default function Sessions() {
     
     try {
       // 从后端 API 加载完整的录制数据
-      const detail = await sessionApi.getSessionRecording(session.sessionId);
+      const response = await sessionApi.getSessionRecording(session.sessionId);
+      // 确保数据格式正确
+      const detail: SessionRecordingDetail = {
+        sessionId: response.sessionId || session.sessionId,
+        hostName: response.hostName || session.hostName,
+        hostIp: response.hostIp || session.hostIp,
+        username: response.username || session.username,
+        startTime: response.startTime || '',
+        endTime: response.endTime || '',
+        recording: response.recording || '',
+        terminalCols: response.terminalCols || 120,
+        terminalRows: response.terminalRows || 30,
+      };
+      
+      if (!detail.recording || detail.recording.trim() === '') {
+        alert('该会话没有录制数据');
+        setLoadingRecording(false);
+        setPlayerOpen(false);
+        return;
+      }
+      
       setRecordingDetail(detail);
       setLoadingRecording(false);
-    } catch (error) {
+      // 延迟设置 dialogReady，确保 Dialog 完全打开后再初始化播放器
+      setTimeout(() => {
+        setDialogReady(true);
+      }, 300);
+    } catch (error: any) {
       console.error('Failed to load recording:', error);
       setLoadingRecording(false);
-      alert('加载录制数据失败，请重试');
+      alert('加载录制数据失败: ' + (error.message || '请重试'));
+      setPlayerOpen(false);
     }
   };
 
@@ -497,4 +522,5 @@ export default function Sessions() {
     </Box>
   );
 }
+
 

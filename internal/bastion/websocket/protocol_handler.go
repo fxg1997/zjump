@@ -272,8 +272,3 @@ func (h *ProtocolHandler) HandleSSH(c *gin.Context) {
 	h.HandleConnection(c)
 }
 
-// HandleRDP 处理 RDP 连接
-func (h *ProtocolHandler) HandleRDP(c *gin.Context) {
-	c.Request.URL.RawQuery = c.Request.URL.RawQuery + "&protocol=rdp"
-	h.HandleConnection(c)
-}

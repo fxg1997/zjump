@@ -408,7 +408,3 @@ func (h *RDPHandler) IsAlive() bool {
 	// }
 }
 
-// 注册 RDP 处理器到工厂
-func init() {
-	GetFactory().Register(ProtocolRDP, NewRDPHandler)
-}

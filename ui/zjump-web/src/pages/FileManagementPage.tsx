@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Box,
   Typography,
-  Button,
   Tabs,
   Tab,
   Paper,
@@ -14,32 +13,37 @@ import {
 import {
   Close as CloseIcon,
   ArrowBack as ArrowBackIcon,
-  CloudUpload as UploadIcon,
 } from '@mui/icons-material';
-import Terminal from '../components/Terminal';
+import FileManager from '../components/FileManager';
 import HostTree from '../components/HostTree';
-import { useTerminal } from '../contexts/TerminalContext';
 import { useTranslation } from 'react-i18next';
 import { Host } from '../types';
 import { hostApi } from '../api/api';
 import api from '../api';
 import { SystemUser } from '../types';
 
-export default function TerminalPage() {
+interface FileManagementSession {
+  id: string;
+  host: Host;
+  systemUserId?: string;
+}
+
+export default function FileManagementPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const { sessions, removeSession, addSession } = useTerminal();
+  const [sessions, setSessions] = useState<FileManagementSession[]>([]);
   const [activeTab, setActiveTab] = useState(0);
-  const [searchParams] = useSearchParams();
   
   // 保存进入全屏页面前的路径
   const [previousPath, setPreviousPath] = useState<string>('/');
   
   // 组件挂载时保存上一个路径
   useEffect(() => {
-    // 从 sessionStorage 获取上一个路径，如果没有则使用默认路径
-    const savedPath = sessionStorage.getItem('terminal_previous_path') || '/';
+    // 如果是从新标签页打开的，尝试从sessionStorage获取之前的路径
+    // 如果没有，则使用referrer或默认路径
+    const savedPath = sessionStorage.getItem('file_management_previous_path') || 
+                      (document.referrer ? new URL(document.referrer).pathname : '/');
     setPreviousPath(savedPath);
   }, []);
 
@@ -50,48 +54,24 @@ export default function TerminalPage() {
     }
   }, [sessions.length, activeTab]);
 
-  // 处理URL参数，自动添加会话
-  useEffect(() => {
-    const hostId = searchParams.get('hostId');
-    const systemUserId = searchParams.get('systemUserId');
-    
-    if (hostId) {
-      const addSessionFromParams = async () => {
-        try {
-          const host = await hostApi.getHost(hostId);
-          // 解析 tags 字段
-          if (typeof host.tags === 'string') {
-            host.tags = JSON.parse(host.tags || '[]');
-          }
-          await connectToHost(host, systemUserId || undefined);
-          navigate('/terminal', { replace: true });
-        } catch (error) {
-          console.error('Failed to add session from URL params:', error);
-        }
-      };
-      
-      addSessionFromParams();
-    }
-  }, [searchParams, navigate]);
-
   const closeTab = (sessionId: string, index: number) => {
-    // 关闭WebSocket连接
-    const session = sessions.find(s => s.id === sessionId);
-    const ws = session?.wsConnection as any;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      console.log(`[TerminalPage] User manually closing WebSocket for session ${sessionId}`);
-      // 标记为用户主动关闭
-      ws.__userClosed = true;
-      ws.close();
-    }
-    
-    // 从Context移除会话
-    removeSession(sessionId);
-    
-    // 如果关闭的是当前激活的标签，切换到前一个
-    if (activeTab === index && index > 0) {
-      setActiveTab(index - 1);
-    }
+    setSessions(prev => {
+      const newSessions = prev.filter(s => s.id !== sessionId);
+      // 如果关闭的是当前激活的标签，切换到其他标签
+      if (index === activeTab) {
+        if (newSessions.length > 0) {
+          // 优先切换到右侧的标签页，如果没有则切换到左侧
+          const nextIndex = index < newSessions.length ? index : newSessions.length - 1;
+          setActiveTab(nextIndex);
+        } else {
+          setActiveTab(0);
+        }
+      } else if (index < activeTab) {
+        // 如果关闭的是左侧的标签，当前激活标签的索引需要减1
+        setActiveTab(activeTab - 1);
+      }
+      return newSessions;
+    });
   };
 
   // 处理主机树中的主机点击
@@ -100,7 +80,6 @@ export default function TerminalPage() {
       // 检查是否已经有该主机的会话
       const existingSession = sessions.find(s => s.host.id === host.id);
       if (existingSession) {
-        // 如果已存在，切换到该会话
         const index = sessions.findIndex(s => s.id === existingSession.id);
         setActiveTab(index);
         return;
@@ -109,58 +88,45 @@ export default function TerminalPage() {
       // 获取主机详细信息
       const hostData = await hostApi.getHost(host.id);
       
-      // 连接主机
-      await connectToHost(hostData);
+      // 检查可用的系统用户
+      let systemUserId: string | undefined;
+      try {
+        const response = await api.get(`/api/system-users/available?hostId=${host.id}`);
+        // 后端返回格式：{ code: 200, message: 'Success', data: [...] }
+        const systemUsers: SystemUser[] = Array.isArray(response.data?.data) 
+          ? response.data.data 
+          : (response.data?.data?.data || response.data || []);
+        
+        if (systemUsers.length === 0) {
+          alert('没有可用的系统用户，请联系管理员配置权限');
+          return;
+        } else if (systemUsers.length === 1) {
+          systemUserId = systemUsers[0].id;
+        } else {
+          systemUserId = systemUsers[0].id;
+        }
+      } catch (error) {
+        console.error('获取系统用户失败:', error);
+      }
+      
+      // 添加会话
+      const newSession: FileManagementSession = {
+        id: `file-${Date.now()}-${Math.random()}`,
+        host: hostData,
+        systemUserId: systemUserId || undefined,
+      };
+      
+      setSessions(prev => {
+        const updatedSessions = [...prev, newSession];
+        // 切换到新添加的会话
+        setTimeout(() => {
+          setActiveTab(updatedSessions.length - 1);
+        }, 100);
+        return updatedSessions;
+      });
     } catch (error) {
       console.error('连接主机失败:', error);
       alert('连接主机失败: ' + (error instanceof Error ? error.message : '未知错误'));
-    }
-  };
-
-  // 连接到主机
-  const connectToHost = async (host: Host, systemUserId?: string) => {
-    try {
-      // 检查是否已有该主机的会话
-      const existingSession = sessions.find(s => s.host.id === host.id);
-      if (existingSession) {
-        const index = sessions.findIndex(s => s.id === existingSession.id);
-        setActiveTab(index);
-        return;
-      }
-
-      // 如果没有指定系统用户，检查可用的系统用户
-      if (!systemUserId) {
-        try {
-          const response = await api.get(`/api/system-users/available?hostId=${host.id}`);
-          const systemUsers: SystemUser[] = Array.isArray(response.data) 
-            ? response.data 
-            : (response.data?.data ? response.data.data : []);
-          
-          if (systemUsers.length === 0) {
-            alert('没有可用的系统用户，请联系管理员配置权限');
-            return;
-          } else if (systemUsers.length === 1) {
-            systemUserId = systemUsers[0].id;
-          } else {
-            // 多个系统用户，使用第一个（可以后续优化为让用户选择）
-            systemUserId = systemUsers[0].id;
-          }
-        } catch (error) {
-          console.error('Failed to get available system users:', error);
-        }
-      }
-
-      // 添加会话
-      addSession(host, systemUserId);
-      
-      // 切换到新添加的会话
-      setTimeout(() => {
-        const newIndex = sessions.length; // 新会话会在最后
-        setActiveTab(newIndex);
-      }, 100);
-    } catch (error) {
-      console.error('Failed to connect to host:', error);
-      alert('连接失败：' + (error instanceof Error ? error.message : '未知错误'));
     }
   };
 
@@ -182,50 +148,45 @@ export default function TerminalPage() {
       {/* 顶部工具栏 */}
       <AppBar position="static" color="default" elevation={1} sx={{ flexShrink: 0 }}>
         <Toolbar>
-          <IconButton edge="start" onClick={() => navigate(previousPath)} sx={{ mr: 2 }}>
+          <IconButton edge="start" onClick={() => {
+            // 如果是新标签页打开的，关闭当前窗口；否则导航回之前的页面
+            if (window.opener) {
+              // 新标签页打开的情况，关闭当前窗口
+              window.close();
+            } else {
+              // 同标签页打开的情况，导航回之前的页面
+              navigate(previousPath);
+            }
+          }} sx={{ mr: 2 }}>
             <ArrowBackIcon />
           </IconButton>
           <Typography variant="h6" sx={{ flexGrow: 1 }}>
-            {t("terminal.title")}
+            文件管理
           </Typography>
           {sessions.length > 0 && (
             <Typography variant="body2" color="text.secondary" sx={{ mr: 2 }}>
-              {t("terminal.activeSessions", { count: sessions.length })}
+              已打开 {sessions.length} 个主机
             </Typography>
           )}
-          {/* 文件管理按钮 */}
-          <Button
-            variant="outlined"
-            startIcon={<UploadIcon />}
-            onClick={() => {
-              // 保存当前路径，以便从文件管理页面返回
-              sessionStorage.setItem('file_management_previous_path', location.pathname);
-              // 在新标签页中打开文件管理页面
-              window.open('/file-management', '_blank');
-            }}
-            sx={{ textTransform: 'none', mr: 1 }}
-          >
-            文件管理
-          </Button>
         </Toolbar>
       </AppBar>
 
-      {/* 主内容区域：左侧主机树 + 右侧终端区域 */}
+      {/* 主内容区域：左侧主机树 + 右侧文件管理区域 */}
       <Box sx={{ flex: 1, minHeight: 0, width: '100%', display: 'flex', gap: 2, p: 2, overflow: 'hidden' }}>
         {/* 左侧：主机树 */}
         <Box sx={{ width: '300px', flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
           <HostTree onHostClick={handleHostClick} />
         </Box>
 
-        {/* 右侧：终端会话区域 */}
+        {/* 右侧：文件管理会话区域 */}
         <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
           {sessions.length === 0 ? (
             <Paper sx={{ p: 4, textAlign: 'center', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
               <Typography variant="h6" gutterBottom color="text.secondary">
-                {t("terminal.noOpenSessions")}
+                未打开任何主机
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                从左侧主机树选择主机进行连接
+                从左侧主机树选择主机进行文件管理
               </Typography>
             </Paper>
           ) : (
@@ -276,7 +237,7 @@ export default function TerminalPage() {
                 </Tabs>
               </Paper>
 
-              {/* 终端会话内容 */}
+              {/* 文件管理会话内容 */}
               <Box sx={{ flex: 1, minHeight: 0, width: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 {sessions.map((session, index) => (
                   <Box
@@ -290,12 +251,9 @@ export default function TerminalPage() {
                       overflow: 'hidden',
                     }}
                   >
-                    <Terminal
-                      hostId={session.host.id}
+                    <FileManager
                       host={session.host}
-                      sessionId={session.id}
                       systemUserId={session.systemUserId}
-                      onClose={() => closeTab(session.id, index)}
                     />
                   </Box>
                 ))}
@@ -307,4 +265,5 @@ export default function TerminalPage() {
     </Box>
   );
 }
+
 

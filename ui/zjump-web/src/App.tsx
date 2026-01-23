@@ -4,9 +4,10 @@ import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Assets from './pages/Assets';
 import TerminalPage from './pages/TerminalPage';
+import FileManagementPage from './pages/FileManagementPage';
 import Commands from './pages/Commands';
-import Sessions from './pages/Sessions';
 import History from './pages/History';
+import Sessions from './pages/Sessions';
 import Settings from './pages/Settings';
 import Blacklist from './pages/Blacklist';
 import Users from './pages/Users';
@@ -66,13 +67,21 @@ function App() {
                 <Route index element={<Dashboard />} />
                 <Route path="assets" element={<Assets />} />
                 <Route path="terminal" element={<TerminalPage />} />
+                <Route path="file-management" element={<FileManagementPage />} />
                 <Route path="commands" element={<Commands />} />
-                <Route path="sessions" element={<Sessions />} />
                 <Route path="history" element={<History />} />
                 <Route path="approvals" element={<Approvals />} />
                 <Route path="profile" element={<Profile />} />
                 
                 {/* 管理员专属路由 */}
+                <Route
+                  path="sessions"
+                  element={
+                    <AdminRoute>
+                      <Sessions />
+                    </AdminRoute>
+                  }
+                />
                 <Route
                   path="system-users"
                   element={
@@ -139,3 +148,4 @@ function App() {
 }
 
 export default App;
+

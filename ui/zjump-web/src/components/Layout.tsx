@@ -297,7 +297,13 @@ export default function Layout() {
               <ListItem key={item.key} disablePadding sx={{ mb: 0.5 }}>
                 <ListItemButton
                   selected={location.pathname === item.path}
-                  onClick={() => navigate(item.path)}
+                  onClick={() => {
+                    // 如果跳转到终端页面，保存当前路径
+                    if (item.path === '/terminal') {
+                      sessionStorage.setItem('terminal_previous_path', location.pathname);
+                    }
+                    navigate(item.path);
+                  }}
                   sx={{
                     borderRadius: 1.5,
                     py: 1.2,
@@ -357,23 +363,25 @@ export default function Layout() {
         component="main"
         sx={{
           flexGrow: 1,
-          p: 3,
-          width: { sm: `calc(100% - ${open ? drawerWidth : 0}px)` },
-          ml: open ? 0 : `-${drawerWidth}px`,
+          p: (location.pathname === '/terminal' || location.pathname === '/file-management') ? 0 : 3,
+          width: { sm: `calc(100% - ${open && location.pathname !== '/terminal' && location.pathname !== '/file-management' ? drawerWidth : 0}px)` },
+          ml: open && location.pathname !== '/terminal' && location.pathname !== '/file-management' ? 0 : `-${drawerWidth}px`,
           transition: theme.transitions.create(['margin', 'width'], {
             easing: theme.transitions.easing.sharp,
             duration: theme.transitions.duration.leavingScreen,
           }),
           minHeight: '100vh',
           backgroundColor: theme.palette.background.default,
+          overflow: (location.pathname === '/terminal' || location.pathname === '/file-management') ? 'hidden' : 'auto',
         }}
       >
-        <Toolbar />
-        <Box sx={{ mt: 3 }}>
+        {(location.pathname !== '/terminal' && location.pathname !== '/file-management') && <Toolbar />}
+        <Box sx={{ mt: (location.pathname === '/terminal' || location.pathname === '/file-management') ? 0 : 3, height: (location.pathname === '/terminal' || location.pathname === '/file-management') ? '100vh' : 'auto' }}>
           <Outlet />
         </Box>
       </Box>
     </Box>
   );
 }
+
 

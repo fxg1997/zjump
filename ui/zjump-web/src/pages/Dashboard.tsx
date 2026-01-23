@@ -24,20 +24,15 @@ import {
   Refresh as RefreshIcon,
 } from '@mui/icons-material';
 import { Host, DashboardStats, LoginRecord } from '../types';
-import { dashboardApi, hostApi, sessionApi } from '../api/api';
-import { useNavigate } from 'react-router-dom';
-import { useTerminal } from '../contexts/TerminalContext';
+import { dashboardApi, sessionApi } from '../api/api';
 import { useTranslation } from 'react-i18next';
 
 export default function Dashboard() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const { addSession } = useTerminal();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recentHosts, setRecentHosts] = useState<Host[]>([]);
   const [recentLogins, setRecentLogins] = useState<LoginRecord[]>([]);
-  const [connectingHostId, setConnectingHostId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [showError, setShowError] = useState(false);
 
@@ -91,45 +86,6 @@ export default function Dashboard() {
   useEffect(() => {
     loadData();
   }, []);
-
-  const handleConnectHost = async (hostId: string) => {
-    setConnectingHostId(hostId);
-    
-    try {
-      // 从当前列表中查找主机（已经加载过了）
-      let host = recentHosts.find(h => h.id === hostId);
-      
-      // 如果列表中没有，从API获取
-      if (!host) {
-        host = await hostApi.getHost(hostId);
-        // 解析 tags 字段
-        if (host && typeof host.tags === 'string') {
-          host.tags = JSON.parse(host.tags || '[]');
-        }
-      }
-      
-      if (!host) {
-        setErrorMessage('未找到主机信息');
-        setShowError(true);
-        setConnectingHostId(null);
-        return;
-      }
-      
-      // 添加会话到 Context
-      addSession(host);
-      
-      // 跳转到终端页面
-      navigate('/terminal');
-      
-    } catch (error) {
-      // 发生错误，显示错误消息
-      const message = error instanceof Error ? error.message : t('dashboard.connectFailed');
-      setErrorMessage(message);
-      setShowError(true);
-    } finally {
-      setConnectingHostId(null);
-    }
-  };
 
   const handleCloseError = () => {
     setShowError(false);
@@ -350,9 +306,6 @@ export default function Dashboard() {
             <Typography variant="h6" fontWeight="600" color="text.primary">
               {t("dashboard.recentHosts")}
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-              {t('dashboard.clickToConnect')}
-            </Typography>
           </Box>
           <TableContainer>
             <Table>
@@ -364,7 +317,7 @@ export default function Dashboard() {
                   <TableCell sx={{ fontWeight: 700, color: '#667eea' }}>{t("common.status")}</TableCell>
                   <TableCell sx={{ fontWeight: 700, color: '#667eea' }}>{t("dashboard.loginCount")}</TableCell>
                   <TableCell sx={{ fontWeight: 700, color: '#667eea' }}>{t("dashboard.lastLogin")}</TableCell>
-                  <TableCell align="center" sx={{ fontWeight: 700, color: '#667eea' }}>{t("common.actions")}</TableCell>
+
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -436,34 +389,7 @@ export default function Dashboard() {
                       />
                     </TableCell>
                     <TableCell sx={{ color: 'text.secondary' }}>{host.lastLoginTime || '-'}</TableCell>
-                    <TableCell align="center">
-                      <IconButton
-                        size="medium"
-                        onClick={() => handleConnectHost(host.id)}
-                        disabled={host.status !== 'online' || connectingHostId === host.id}
-                        sx={{
-                          background: host.status === 'online' 
-                            ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' 
-                            : 'rgba(0,0,0,0.12)',
-                          color: 'white',
-                          '&:hover': {
-                            background: host.status === 'online' 
-                              ? 'linear-gradient(135deg, #764ba2 0%, #667eea 100%)' 
-                              : 'rgba(0,0,0,0.12)',
-                          },
-                          '&:disabled': {
-                            color: 'rgba(0,0,0,0.26)',
-                          },
-                        }}
-                        title="连接终端"
-                      >
-                        {connectingHostId === host.id ? (
-                          <CircularProgress size={20} sx={{ color: 'white' }} />
-                        ) : (
-                          <TerminalIcon fontSize="small" />
-                        )}
-                      </IconButton>
-                    </TableCell>
+  
                   </TableRow>
                 ))}
               </TableBody>
@@ -591,4 +517,5 @@ export default function Dashboard() {
     </Box>
   );
 }
+
 

@@ -31,37 +31,26 @@ import {
   Checkbox,
 } from '@mui/material';
 import {
-  Terminal as TerminalIcon,
   Refresh as RefreshIcon,
   Search as SearchIcon,
-  UploadFile as UploadFileIcon,
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
 } from '@mui/icons-material';
-import { Host, DeviceType, Protocol, SystemUser } from '../types';
+import { Host, DeviceType, Protocol } from '../types';
 import { mockHosts, useMockData } from '../api/mockData';
 import { hostApi, hostGroupApi, HostGroup } from '../api/api';
-import { useNavigate } from 'react-router-dom';
-import { useTerminal } from '../contexts/TerminalContext';
 import { getDeviceTypeName } from '../utils/websocket';
 import { useTranslation } from 'react-i18next';
-import FileUploadDialog from '../components/FileUploadDialog';
-import api from '../api';
 
 export default function Assets() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const { addSession } = useTerminal();
   const [loading, setLoading] = useState(true);
   const [hosts, setHosts] = useState<Host[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [connectingHostId, setConnectingHostId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [showError, setShowError] = useState(false);
   const [alertSeverity, setAlertSeverity] = useState<'success' | 'error'>('error');
-  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
-  const [selectedHostForUpload, setSelectedHostForUpload] = useState<Host | null>(null);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   
@@ -96,12 +85,6 @@ export default function Assets() {
     tags: '',
   });
 
-  // 系统用户选择相关状态
-  const [systemUserDialogOpen, setSystemUserDialogOpen] = useState(false);
-  const [availableSystemUsers, setAvailableSystemUsers] = useState<SystemUser[]>([]);
-  const [selectedSystemUser, setSelectedSystemUser] = useState<string>('');
-  const [pendingHost, setPendingHost] = useState<Host | null>(null);
-  
   // 获取用户角色
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
@@ -149,105 +132,9 @@ export default function Assets() {
     loadHostGroups();
   }, []);
 
-  const handleConnect = async (hostId: string, systemUserId?: string) => {
-    setConnectingHostId(hostId);
-    
-    try {
-      let host: Host | undefined;
-      
-      // 获取主机信息
-      if (useMockData) {
-        host = mockHosts.find(h => h.id === hostId);
-      } else {
-        // 获取主机详情
-        host = await hostApi.getHost(hostId);
-        // 解析 tags 字段
-        if (host && typeof host.tags === 'string') {
-          host.tags = JSON.parse(host.tags || '[]');
-        }
-      }
-      
-      if (!host) {
-        setAlertSeverity('error');
-        setErrorMessage('未找到主机信息');
-        setShowError(true);
-        setConnectingHostId(null);
-        return;
-      }
-
-      // 如果没有指定系统用户，检查可用的系统用户
-      if (!systemUserId && !useMockData) {
-        try {
-          const response = await api.get(`/api/system-users/available?hostId=${hostId}`);
-          // 确保响应数据是数组格式
-          const systemUsers: SystemUser[] = Array.isArray(response.data) 
-            ? response.data 
-            : (response.data?.data ? response.data.data : []);
-          
-          if (systemUsers.length === 0) {
-            setAlertSeverity('error');
-            setErrorMessage('没有可用的系统用户，请联系管理员配置权限');
-            setShowError(true);
-            setConnectingHostId(null);
-            return;
-          } else if (systemUsers.length === 1) {
-            // 只有一个系统用户，直接使用
-            systemUserId = systemUsers[0].id;
-          } else {
-            // 多个系统用户，让用户选择
-            setAvailableSystemUsers(systemUsers);
-            setPendingHost(host);
-            setSystemUserDialogOpen(true);
-            setConnectingHostId(null);
-            return;
-          }
-        } catch (error) {
-          console.error('Failed to get available system users:', error);
-          // 如果获取失败，继续使用主机配置的用户（向后兼容）
-        }
-      }
-      
-      // 添加会话到 Context，携带系统用户ID
-      addSession(host, systemUserId);
-      
-      // 跳转到终端页面
-      navigate('/terminal');
-      
-    } catch (error) {
-      // 发生错误，显示错误消息
-      const message = error instanceof Error ? error.message : t('assets.connectionFailed');
-      setAlertSeverity('error');
-      setErrorMessage(message);
-      setShowError(true);
-    } finally {
-      setConnectingHostId(null);
-    }
-  };
-
-  // 确认系统用户选择
-  const handleSystemUserSelect = () => {
-    if (!selectedSystemUser || !pendingHost) return;
-    
-    setSystemUserDialogOpen(false);
-    handleConnect(pendingHost.id, selectedSystemUser);
-    setSelectedSystemUser('');
-    setPendingHost(null);
-  };
-
-  // 取消系统用户选择
-  const handleSystemUserCancel = () => {
-    setSystemUserDialogOpen(false);
-    setSelectedSystemUser('');
-    setPendingHost(null);
-  };
 
   const handleCloseError = () => {
     setShowError(false);
-  };
-
-  const handleFileUpload = (host: Host) => {
-    setSelectedHostForUpload(host);
-    setUploadDialogOpen(true);
   };
 
   // 打开新增主机对话框
@@ -257,7 +144,7 @@ export default function Assets() {
       ip: '',
       port: 22,
       protocol: 'ssh' as Protocol,
-      deviceType: 'server' as DeviceType,
+      deviceType: 'linux' as DeviceType,
       username: 'root',
       tags: '',
     });
@@ -702,54 +589,6 @@ export default function Assets() {
                     </TableCell>
                     <TableCell align="center" sx={{ width: 130 }}>
                       <Box display="flex" gap={1} justifyContent="center">
-                        <Tooltip title="连接终端">
-                          <span>
-                            <IconButton
-                              size="small"
-                              onClick={() => handleConnect(host.id)}
-                              disabled={host.status !== 'online' || connectingHostId === host.id}
-                              sx={{
-                                backgroundColor: host.status === 'online' 
-                                  ? 'rgba(102, 126, 234, 0.1)' 
-                                  : 'transparent',
-                                color: host.status === 'online' ? '#667eea' : 'rgba(0,0,0,0.26)',
-                                '&:hover': {
-                                  backgroundColor: host.status === 'online' 
-                                    ? 'rgba(102, 126, 234, 0.2)' 
-                                    : 'transparent',
-                                },
-                              }}
-                            >
-                              {connectingHostId === host.id ? (
-                                <CircularProgress size={16} sx={{ color: '#667eea' }} />
-                              ) : (
-                                <TerminalIcon fontSize="small" />
-                              )}
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                        <Tooltip title={t("settings.fileUpload")}>
-                          <span>
-                            <IconButton
-                              size="small"
-                              onClick={() => handleFileUpload(host)}
-                              disabled={host.status !== 'online'}
-                              sx={{
-                                backgroundColor: host.status === 'online' 
-                                  ? 'rgba(76, 175, 80, 0.1)' 
-                                  : 'transparent',
-                                color: host.status === 'online' ? '#4caf50' : 'rgba(0,0,0,0.26)',
-                                '&:hover': {
-                                  backgroundColor: host.status === 'online' 
-                                    ? 'rgba(76, 175, 80, 0.2)' 
-                                    : 'transparent',
-                                },
-                              }}
-                            >
-                              <UploadFileIcon fontSize="small" />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
                         {isAdmin && (
                           <>
                             <Tooltip title="编辑主机">
@@ -842,15 +681,7 @@ export default function Assets() {
         </Alert>
       </Snackbar>
 
-      {/* 文件上传对话框 */}
-      <FileUploadDialog
-        open={uploadDialogOpen}
-        onClose={() => {
-          setUploadDialogOpen(false);
-          setSelectedHostForUpload(null);
-        }}
-        host={selectedHostForUpload}
-      />
+
 
       {/* 编辑主机对话框 */}
       <Dialog 
@@ -1259,63 +1090,11 @@ export default function Assets() {
         </DialogActions>
       </Dialog>
 
-      {/* 系统用户选择对话框 */}
-      <Dialog
-        open={systemUserDialogOpen}
-        onClose={handleSystemUserCancel}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>选择系统用户</DialogTitle>
-        <DialogContent>
-          <Box sx={{ mt: 2 }}>
-            <Typography variant="body2" color="text.secondary" gutterBottom>
-              检测到多个可用的系统用户，请选择要使用的用户：
-            </Typography>
-            <FormControl fullWidth sx={{ mt: 2 }}>
-              <InputLabel>系统用户</InputLabel>
-              <Select
-                value={selectedSystemUser}
-                onChange={(e) => setSelectedSystemUser(e.target.value)}
-                label="系统用户"
-              >
-                {Array.isArray(availableSystemUsers) && availableSystemUsers.map((su) => (
-                  <MenuItem key={su.id} value={su.id}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-                      <span>{su.name} ({su.username})</span>
-                      <Chip 
-                        label={su.authType === 'password' ? '密码' : su.authType === 'key' ? '密钥' : '自动'} 
-                        size="small" 
-                        color={su.authType === 'password' ? 'success' : 'primary'}
-                      />
-                    </Box>
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            {pendingHost && (
-              <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
-                <Typography variant="caption" color="text.secondary">
-                  连接到：{pendingHost.name} ({pendingHost.ip})
-                </Typography>
-              </Box>
-            )}
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleSystemUserCancel}>
-            取消
-          </Button>
-          <Button 
-            onClick={handleSystemUserSelect}
-            variant="contained"
-            disabled={!selectedSystemUser}
-          >
-            确认连接
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   );
 }
+
+
+
+
 
