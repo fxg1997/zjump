@@ -33,7 +33,6 @@ import {
   Home as HomeIcon,
   NavigateNext as NavigateNextIcon,
   Search as SearchIcon,
-  ArrowUpward as ArrowUpwardIcon,
 } from '@mui/icons-material';
 import { Host } from '../types';
 import { fileApi } from '../api/api';

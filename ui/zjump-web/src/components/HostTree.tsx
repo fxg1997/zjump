@@ -51,7 +51,6 @@ export default function HostTree({ onHostClick }: HostTreeProps) {
   const [directHosts, setDirectHosts] = useState<Host[]>([]); // 直接授权的主机（不属于任何分组）
 
   // 获取当前用户信息
-  const [user, setUser] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
 
   // 加载当前用户信息
@@ -59,7 +58,6 @@ export default function HostTree({ onHostClick }: HostTreeProps) {
     const loadCurrentUser = async () => {
       try {
         const userInfo = await authApi.getCurrentUser();
-        setUser(userInfo);
         setIsAdmin(userInfo?.role === 'admin');
       } catch (error) {
         console.error('获取当前用户失败:', error);
@@ -67,7 +65,6 @@ export default function HostTree({ onHostClick }: HostTreeProps) {
         const userStr = localStorage.getItem('user');
         if (userStr) {
           const localUser = JSON.parse(userStr);
-          setUser(localUser);
           setIsAdmin(localUser?.role === 'admin');
         }
       }

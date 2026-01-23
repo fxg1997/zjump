@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -16,7 +16,6 @@ import {
 } from '@mui/icons-material';
 import FileManager from '../components/FileManager';
 import HostTree from '../components/HostTree';
-import { useTranslation } from 'react-i18next';
 import { Host } from '../types';
 import { hostApi } from '../api/api';
 import api from '../api';
@@ -29,9 +28,7 @@ interface FileManagementSession {
 }
 
 export default function FileManagementPage() {
-  const { t } = useTranslation();
   const navigate = useNavigate();
-  const location = useLocation();
   const [sessions, setSessions] = useState<FileManagementSession[]>([]);
   const [activeTab, setActiveTab] = useState(0);
   
