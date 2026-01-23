@@ -951,11 +951,12 @@ export interface AssetSyncLog {
 // 文件传输 API
 export const fileApi = {
   // 上传文件到目标服务器
-  uploadFile: async (hostId: string, remotePath: string, file: File, onProgress?: (progress: number) => void) => {
+  uploadFile: async (hostId: string, remotePath: string, systemUserId: string, file: File, onProgress?: (progress: number) => void): Promise<any> => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('hostId', hostId);
     formData.append('remotePath', remotePath);
+    formData.append('systemUserId', systemUserId);
 
     try {
       const response = await axiosInstance.post('/api/files/upload', formData, {
@@ -975,6 +976,30 @@ export const fileApi = {
       console.error('Failed to upload file:', error);
       throw error;
     }
+  },
+
+  // 从目标服务器下载文件
+  downloadFile: async (hostId: string, remotePath: string, systemUserId: string): Promise<Blob> => {
+    try {
+      const response = await axiosInstance.get('/api/files/download', {
+        params: {
+          hostId,
+          remotePath,
+          systemUserId,
+        },
+        responseType: 'blob',
+      });
+
+      return response.data;
+    } catch (error) {
+      console.error('Failed to download file:', error);
+      throw error;
+    }
+  },
+
+  // 列出远程目录文件
+  listFiles: async (hostId: string, path: string, systemUserId: string): Promise<{ files: any[] }> => {
+    return request<{ files: any[] }>(`/api/files/list?hostId=${hostId}&path=${encodeURIComponent(path)}&systemUserId=${systemUserId}`);
   },
 
   // 获取文件传输记录
@@ -1039,4 +1064,5 @@ export const assetSyncApi = {
       `/api/asset-sync/logs${configId ? `?configId=${configId}` : ''}`
     ),
 };
+
 

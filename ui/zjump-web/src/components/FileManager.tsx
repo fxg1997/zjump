@@ -155,7 +155,7 @@ export default function FileManager({ host, systemUserId }: FileManagerProps) {
       currentPath,
       systemUserId,
       selectedFile,
-      (progress) => {
+      (progress: number) => {
         setUploadProgress(progress);
       }
     )
