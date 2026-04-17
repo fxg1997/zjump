@@ -5,31 +5,106 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"path/filepath"
+	"path"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/fisker/zjump-backend/internal/model"
 	"github.com/fisker/zjump-backend/internal/repository"
+	"github.com/fisker/zjump-backend/pkg/sshclient"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type FileHandler struct {
-	db       *gorm.DB
-	hostRepo *repository.HostRepository
+	db             *gorm.DB
+	hostRepo       *repository.HostRepository
+	systemUserRepo *repository.SystemUserRepository
 }
 
-func NewFileHandler(db *gorm.DB, hostRepo *repository.HostRepository) *FileHandler {
+type RemoteFileInfo struct {
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	Size    int64  `json:"size"`
+	IsDir   bool   `json:"isDir"`
+	Mode    string `json:"mode"`
+	ModTime string `json:"modTime"`
+}
+
+func NewFileHandler(db *gorm.DB, hostRepo *repository.HostRepository, systemUserRepo *repository.SystemUserRepository) *FileHandler {
 	return &FileHandler{
-		db:       db,
-		hostRepo: hostRepo,
+		db:             db,
+		hostRepo:       hostRepo,
+		systemUserRepo: systemUserRepo,
 	}
 }
 
-// UploadFile 上传文件到目标服务器
+// ListFiles lists a remote directory over SSH.
+func (h *FileHandler) ListFiles(c *gin.Context) {
+	hostID := c.Query("hostId")
+	systemUserID := c.Query("systemUserId")
+	requestedPath := c.Query("path")
+
+	if hostID == "" || systemUserID == "" {
+		c.JSON(http.StatusBadRequest, model.Error(400, "Missing hostId or systemUserId"))
+		return
+	}
+
+	userIDValue, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, model.Error(401, "Unauthorized"))
+		return
+	}
+
+	userID, ok := userIDValue.(string)
+	if !ok || userID == "" {
+		c.JSON(http.StatusUnauthorized, model.Error(401, "Invalid user context"))
+		return
+	}
+
+	hasPermission, err := h.systemUserRepo.CheckUserHasPermission(userID, hostID, systemUserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, model.Error(500, "Failed to check permission: "+err.Error()))
+		return
+	}
+	if !hasPermission {
+		c.JSON(http.StatusForbidden, model.Error(403, "No permission to use this system user"))
+		return
+	}
+
+	host, err := h.hostRepo.FindByID(hostID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, model.Error(404, "Host not found"))
+		return
+	}
+
+	systemUser, err := h.systemUserRepo.FindByID(systemUserID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, model.Error(404, "System user not found"))
+		return
+	}
+	if systemUser.Protocol != "" && systemUser.Protocol != "ssh" {
+		c.JSON(http.StatusBadRequest, model.Error(400, "Only SSH system users support file listing"))
+		return
+	}
+
+	cleanPath := normalizeRemotePath(requestedPath)
+	files, err := h.listRemoteFiles(host, systemUser, cleanPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, model.Error(500, "Failed to list files: "+err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, model.Success(gin.H{
+		"files": files,
+	}))
+}
+
+// UploadFile uploads a file to the target host.
 func (h *FileHandler) UploadFile(c *gin.Context) {
-	// 获取参数
 	hostID := c.PostForm("hostId")
 	remotePath := c.PostForm("remotePath")
 
@@ -37,12 +112,10 @@ func (h *FileHandler) UploadFile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, model.Error(400, "Missing hostId"))
 		return
 	}
-
 	if remotePath == "" {
 		remotePath = "/tmp"
 	}
 
-	// 获取上传的文件
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, model.Error(400, "Failed to get file: "+err.Error()))
@@ -50,47 +123,44 @@ func (h *FileHandler) UploadFile(c *gin.Context) {
 	}
 	defer file.Close()
 
-	// 获取用户信息（修复：使用驼峰命名与中间件一致）
-	userID, exists := c.Get("userID")
+	userIDValue, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, model.Error(401, "未找到用户信息"))
+		c.JSON(http.StatusUnauthorized, model.Error(401, "Unauthorized"))
 		return
 	}
-	username, _ := c.Get("username")
+	usernameValue, _ := c.Get("username")
 
-	// 获取主机信息
 	host, err := h.hostRepo.FindByID(hostID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, model.Error(404, "Host not found"))
 		return
 	}
 
-	// 创建文件传输记录
-	transferID := uuid.New().String()
-	startTime := time.Now()
-
-	// 安全的类型转换
-	userIDStr, ok := userID.(string)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, model.Error(500, "用户ID类型错误"))
+	userID, ok := userIDValue.(string)
+	if !ok || userID == "" {
+		c.JSON(http.StatusInternalServerError, model.Error(500, "Invalid user ID"))
 		return
 	}
-	usernameStr, ok := username.(string)
-	if !ok {
-		usernameStr = "unknown" // 如果username获取失败，使用默认值
+	username, _ := usernameValue.(string)
+	if username == "" {
+		username = "unknown"
 	}
+
+	transferID := uuid.New().String()
+	startTime := time.Now()
+	fullRemotePath := path.Join(normalizeRemotePath(remotePath), header.Filename)
 
 	transfer := &model.FileTransfer{
 		ID:            transferID,
-		SessionID:     uuid.New().String(), // 文件传输也需要会话ID
-		UserID:        userIDStr,
-		Username:      usernameStr,
+		SessionID:     uuid.New().String(),
+		UserID:        userID,
+		Username:      username,
 		HostID:        host.ID,
 		HostIP:        host.IP,
 		HostName:      host.Name,
 		Direction:     "upload",
 		LocalPath:     header.Filename,
-		RemotePath:    filepath.Join(remotePath, header.Filename),
+		RemotePath:    fullRemotePath,
 		FileName:      header.Filename,
 		FileSize:      header.Size,
 		Status:        "uploading",
@@ -102,9 +172,7 @@ func (h *FileHandler) UploadFile(c *gin.Context) {
 		log.Printf("[FileHandler] Failed to create transfer record: %v", err)
 	}
 
-	// 通过SFTP上传文件
 	err = h.uploadFileSFTP(host, remotePath, header.Filename, file, func(progress int) {
-		// 更新进度
 		h.db.Model(&model.FileTransfer{}).Where("id = ?", transferID).Update("progress", progress)
 	})
 
@@ -112,7 +180,6 @@ func (h *FileHandler) UploadFile(c *gin.Context) {
 	duration := int(completedAt.Sub(startTime).Seconds())
 
 	if err != nil {
-		// 更新为失败状态
 		h.db.Model(&model.FileTransfer{}).Where("id = ?", transferID).Updates(map[string]interface{}{
 			"status":        "failed",
 			"error_message": err.Error(),
@@ -124,7 +191,6 @@ func (h *FileHandler) UploadFile(c *gin.Context) {
 		return
 	}
 
-	// 更新为成功状态
 	h.db.Model(&model.FileTransfer{}).Where("id = ?", transferID).Updates(map[string]interface{}{
 		"status":       "completed",
 		"progress":     100,
@@ -139,110 +205,157 @@ func (h *FileHandler) UploadFile(c *gin.Context) {
 			"transferId": transferID,
 			"fileName":   header.Filename,
 			"fileSize":   header.Size,
-			"remotePath": filepath.Join(remotePath, header.Filename),
+			"remotePath": fullRemotePath,
 			"duration":   duration,
 		},
 	})
 }
 
-// uploadFileSFTP 通过SFTP上传文件
-// TODO: 需要重构此方法，传入 SystemUser 参数以获取认证信息
-// 当前实现已不可用，因为 Host 模型已移除认证字段
+// uploadFileSFTP currently remains a placeholder because the upload flow still
+// needs a complete SystemUser-aware SFTP implementation.
 func (h *FileHandler) uploadFileSFTP(host *model.Host, remotePath, filename string, fileReader io.Reader, progressCallback func(int)) error {
-	// TODO: 需要从 SystemUser 获取认证信息
-	return fmt.Errorf("文件上传功能需要重构以支持系统用户认证，请稍后再试")
-
-	// 以下代码需要重构
-	/*
-		// 创建SSH连接
-		config := &ssh.ClientConfig{
-			User: systemUser.Username,  // 从 SystemUser 获取
-			Auth: []ssh.AuthMethod{
-				ssh.Password(systemUser.Password),
-			},
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-			Timeout:         30 * time.Second,
-		}
-
-		if systemUser.PrivateKey != "" {
-			signer, err := ssh.ParsePrivateKey([]byte(systemUser.PrivateKey))
-			if err == nil {
-				config.Auth = append(config.Auth, ssh.PublicKeys(signer))
-			}
-		}
-
-
-		conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", host.IP, host.Port), config)
-		if err != nil {
-			return fmt.Errorf("failed to dial: %w", err)
-		}
-		defer conn.Close()
-
-		// 创建SFTP会话
-		session, err := conn.NewSession()
-		if err != nil {
-			return fmt.Errorf("failed to create session: %w", err)
-		}
-		defer session.Close()
-
-		// 获取stdin管道
-		stdin, err := session.StdinPipe()
-		if err != nil {
-			return fmt.Errorf("failed to get stdin pipe: %w", err)
-		}
-
-		// 创建目标文件
-		remoteFile := filepath.Join(remotePath, filename)
-		cmd := fmt.Sprintf("cat > %s", remoteFile)
-
-		if err := session.Start(cmd); err != nil {
-			return fmt.Errorf("failed to start command: %w", err)
-		}
-
-		// 复制文件内容
-		buffer := make([]byte, 32*1024) // 32KB buffer
-		var totalWritten int64
-
-		for {
-			n, err := fileReader.Read(buffer)
-			if n > 0 {
-				written, writeErr := stdin.Write(buffer[:n])
-				if writeErr != nil {
-					return fmt.Errorf("failed to write: %w", writeErr)
-				}
-				totalWritten += int64(written)
-
-				// 更新进度（暂时简化，实际需要知道文件总大小）
-				if progressCallback != nil {
-					progressCallback(50) // 简化的进度更新
-				}
-			}
-
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				return fmt.Errorf("failed to read: %w", err)
-			}
-		}
-
-		stdin.Close()
-
-		if progressCallback != nil {
-			progressCallback(100)
-		}
-
-		return session.Wait()
-	*/
+	return fmt.Errorf("file upload needs a SystemUser-aware SFTP implementation")
 }
 
-// GetFileTransfers 获取文件传输记录列表
+func (h *FileHandler) listRemoteFiles(host *model.Host, systemUser *model.SystemUser, remotePath string) ([]RemoteFileInfo, error) {
+	cfg := sshclient.SSHConfig{
+		Host:       host.IP,
+		Port:       host.Port,
+		Username:   systemUser.Username,
+		Password:   systemUser.Password,
+		PrivateKey: systemUser.PrivateKey,
+		Passphrase: systemUser.Passphrase,
+		AuthType:   systemUser.AuthType,
+		Timeout:    30 * time.Second,
+	}
+
+	client, err := sshclient.NewSSHClient(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect via SSH: %w", err)
+	}
+	defer client.Close()
+
+	session, err := client.NewSession()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SSH session: %w", err)
+	}
+
+	output, err := session.CombinedOutput(buildListFilesCommand(remotePath))
+	if err != nil {
+		return nil, fmt.Errorf("remote command failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	files, err := parseRemoteFileList(output, remotePath)
+	if err != nil {
+		return nil, err
+	}
+
+	if remotePath != "/" {
+		parentPath := path.Dir(remotePath)
+		if parentPath == "." {
+			parentPath = "/"
+		}
+		files = append([]RemoteFileInfo{{
+			Name:  "..",
+			Path:  parentPath,
+			IsDir: true,
+			Mode:  "drwxr-xr-x",
+		}}, files...)
+	}
+
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].Name == ".." {
+			return true
+		}
+		if files[j].Name == ".." {
+			return false
+		}
+		if files[i].IsDir != files[j].IsDir {
+			return files[i].IsDir
+		}
+		return strings.ToLower(files[i].Name) < strings.ToLower(files[j].Name)
+	})
+
+	return files, nil
+}
+
+func buildListFilesCommand(remotePath string) string {
+	return "sh -c " + shellQuote(
+		"TARGET=" + shellQuote(remotePath) + "\n" +
+			"if [ ! -d \"$TARGET\" ]; then\n" +
+			"  echo \"directory not found: $TARGET\" >&2\n" +
+			"  exit 1\n" +
+			"fi\n" +
+			"LC_ALL=C find \"$TARGET\" -mindepth 1 -maxdepth 1 -printf '%f\\0%y\\0%s\\0%M\\0%TY-%Tm-%Td %TH:%TM:%TS\\0'\n",
+	)
+}
+
+func parseRemoteFileList(output []byte, currentPath string) ([]RemoteFileInfo, error) {
+	if len(output) == 0 {
+		return []RemoteFileInfo{}, nil
+	}
+
+	parts := strings.Split(string(output), "\x00")
+	if len(parts) > 0 && parts[len(parts)-1] == "" {
+		parts = parts[:len(parts)-1]
+	}
+
+	if len(parts)%5 != 0 {
+		return nil, fmt.Errorf("unexpected remote file list format")
+	}
+
+	files := make([]RemoteFileInfo, 0, len(parts)/5)
+	for i := 0; i < len(parts); i += 5 {
+		size, err := strconv.ParseInt(parts[i+2], 10, 64)
+		if err != nil {
+			size = 0
+		}
+
+		files = append(files, RemoteFileInfo{
+			Name:    parts[i],
+			Path:    joinRemotePath(currentPath, parts[i]),
+			Size:    size,
+			IsDir:   parts[i+1] == "d",
+			Mode:    parts[i+3],
+			ModTime: strings.TrimSpace(parts[i+4]),
+		})
+	}
+
+	return files, nil
+}
+
+func normalizeRemotePath(p string) string {
+	if strings.TrimSpace(p) == "" {
+		return "/"
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+
+	cleanPath := path.Clean(p)
+	if cleanPath == "." {
+		return "/"
+	}
+	return cleanPath
+}
+
+func joinRemotePath(basePath, name string) string {
+	if basePath == "/" {
+		return "/" + name
+	}
+	return path.Join(basePath, name)
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
+}
+
+// GetFileTransfers returns recorded file transfer tasks.
 func (h *FileHandler) GetFileTransfers(c *gin.Context) {
 	var transfers []model.FileTransfer
 
 	query := h.db.Model(&model.FileTransfer{}).Order("transferred_at DESC")
 
-	// 可选过滤条件
 	if hostID := c.Query("hostId"); hostID != "" {
 		query = query.Where("host_id = ?", hostID)
 	}
@@ -261,12 +374,13 @@ func (h *FileHandler) GetFileTransfers(c *gin.Context) {
 	c.JSON(http.StatusOK, model.Response{
 		Code:    0,
 		Message: "File transfers retrieved successfully",
-		Data:    gin.H{"transfers": transfers},
+		Data: gin.H{
+			"transfers": transfers,
+		},
 	})
 }
 
-// DownloadFile 从目标服务器下载文件
+// DownloadFile is not implemented yet.
 func (h *FileHandler) DownloadFile(c *gin.Context) {
-	// TODO: 实现文件下载功能
 	c.JSON(http.StatusNotImplemented, model.Error(501, "Download not implemented yet"))
 }

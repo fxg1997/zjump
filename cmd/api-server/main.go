@@ -140,7 +140,7 @@ func main() {
 
 	approvalHandler := handler.NewApprovalHandler(database.DB, approvalFactory)
 	approvalCallbackHandler := handler.NewApprovalCallbackHandler(database.DB)
-	fileHandler := handler.NewFileHandler(database.DB, hostRepo)
+	fileHandler := handler.NewFileHandler(database.DB, hostRepo, systemUserRepo)
 
 	// Initialize Asset Sync
 	assetSyncRepo := repository.NewAssetSyncRepository(database.DB)
