@@ -963,6 +963,7 @@ export const fileApi = {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+        timeout: 0, // Large file transfers should not inherit the global 30s timeout.
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total && onProgress) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
@@ -987,6 +988,7 @@ export const fileApi = {
           remotePath,
           systemUserId,
         },
+        timeout: 0, // Downloads can take much longer than the default API timeout.
         responseType: 'blob',
       });
 

@@ -277,24 +277,69 @@ func (h *FileHandler) listRemoteFiles(host *model.Host, systemUser *model.System
 	return files, nil
 }
 
-func (h *FileHandler) downloadFile(host *model.Host, systemUser *model.SystemUser, remotePath string) ([]byte, error) {
+func (h *FileHandler) getRemoteFileSize(host *model.Host, systemUser *model.SystemUser, remotePath string) (int64, error) {
 	client, err := h.newSSHClient(host, systemUser)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	defer client.Close()
 
 	session, err := client.NewSession()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create SSH session: %w", err)
+		return 0, fmt.Errorf("failed to create SSH session: %w", err)
 	}
 
-	output, err := session.CombinedOutput(buildDownloadFileCommand(remotePath))
+	output, err := session.CombinedOutput(buildRemoteFileSizeCommand(remotePath))
 	if err != nil {
-		return nil, fmt.Errorf("remote download command failed: %w: %s", err, strings.TrimSpace(string(output)))
+		return 0, fmt.Errorf("remote file stat failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 
-	return output, nil
+	size, err := strconv.ParseInt(strings.TrimSpace(string(output)), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse remote file size: %w", err)
+	}
+
+	return size, nil
+}
+
+func (h *FileHandler) streamDownloadFile(c *gin.Context, host *model.Host, systemUser *model.SystemUser, remotePath string) error {
+	client, err := h.newSSHClient(host, systemUser)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	session, err := client.NewSession()
+	if err != nil {
+		return fmt.Errorf("failed to create SSH session: %w", err)
+	}
+	defer session.Close()
+
+	stdout, err := session.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to open SSH stdout: %w", err)
+	}
+
+	var stderr bytes.Buffer
+	session.Stderr = &stderr
+
+	if err := session.Start(buildDownloadFileCommand(remotePath)); err != nil {
+		return fmt.Errorf("failed to start remote download command: %w", err)
+	}
+
+	if _, err := io.Copy(c.Writer, stdout); err != nil {
+		return fmt.Errorf("failed to stream download data: %w", err)
+	}
+
+	if err := session.Wait(); err != nil {
+		errText := strings.TrimSpace(stderr.String())
+		if errText != "" {
+			return fmt.Errorf("remote download command failed: %w: %s", err, errText)
+		}
+		return fmt.Errorf("remote download command failed: %w", err)
+	}
+
+	return nil
 }
 
 func (h *FileHandler) newSSHClient(host *model.Host, systemUser *model.SystemUser) (*sshclient.SSHClient, error) {
@@ -397,6 +442,17 @@ func buildDownloadFileCommand(remotePath string) string {
 			"  exit 1\n" +
 			"fi\n" +
 			"cat \"$TARGET\"\n",
+	)
+}
+
+func buildRemoteFileSizeCommand(remotePath string) string {
+	return "sh -c " + shellQuote(
+		"TARGET=" + shellQuote(remotePath) + "\n" +
+			"if [ ! -f \"$TARGET\" ]; then\n" +
+			"  echo \"file not found: $TARGET\" >&2\n" +
+			"  exit 1\n" +
+			"fi\n" +
+			"wc -c < \"$TARGET\"\n",
 	)
 }
 
@@ -508,9 +564,9 @@ func (h *FileHandler) DownloadFile(c *gin.Context) {
 	}
 
 	cleanPath := normalizeRemotePath(remotePath)
-	content, err := h.downloadFile(host, systemUser, cleanPath)
+	fileSize, err := h.getRemoteFileSize(host, systemUser, cleanPath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, model.Error(500, "Failed to download file: "+err.Error()))
+		c.JSON(http.StatusInternalServerError, model.Error(500, "Failed to stat file before download: "+err.Error()))
 		return
 	}
 
@@ -520,5 +576,16 @@ func (h *FileHandler) DownloadFile(c *gin.Context) {
 	}
 
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fileName))
-	c.Data(http.StatusOK, "application/octet-stream", content)
+	c.Header("Content-Type", "application/octet-stream")
+	if fileSize >= 0 {
+		c.Header("Content-Length", strconv.FormatInt(fileSize, 10))
+	}
+
+	if err := h.streamDownloadFile(c, host, systemUser, cleanPath); err != nil {
+		if !c.Writer.Written() {
+			c.JSON(http.StatusInternalServerError, model.Error(500, "Failed to download file: "+err.Error()))
+			return
+		}
+		log.Printf("[FileHandler] Download stream interrupted for %s: %v", cleanPath, err)
+	}
 }
