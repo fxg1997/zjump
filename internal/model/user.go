@@ -54,42 +54,6 @@ func (PlatformLoginRecord) TableName() string {
 	return "platform_login_records" // 使用独立的表，不与虚拟机登录记录混淆
 }
 
-// ==================================================================================
-// DEPRECATED: 以下两个模型已废弃，新权限架构使用：
-// User → UserGroup (user_groups) → PermissionRule (permission_rules) → (SystemUser + HostGroup)
-// 保留这些模型是为了向后兼容，但建议在新系统中不再使用
-// ==================================================================================
-
-// UserGroupPermission 用户-主机分组权限关联 [DEPRECATED]
-// Deprecated: 使用新的 UserGroup + PermissionRule 架构替代
-type UserGroupPermission struct {
-	ID        uint      `json:"id" gorm:"primaryKey;autoIncrement"`
-	UserID    string    `json:"userId" gorm:"type:varchar(36);not null;index"`
-	GroupID   string    `json:"groupId" gorm:"type:varchar(36);not null;index"`
-	CreatedBy string    `json:"createdBy,omitempty" gorm:"type:varchar(36)"`
-	CreatedAt time.Time `json:"createdAt" gorm:"autoCreateTime"`
-	UpdatedAt time.Time `json:"updatedAt" gorm:"autoUpdateTime"`
-}
-
-func (UserGroupPermission) TableName() string {
-	return "user_group_permissions"
-}
-
-// UserHostPermission 用户-主机权限关联（单个主机）[DEPRECATED]
-// Deprecated: 使用新的 UserGroup + PermissionRule 架构替代
-type UserHostPermission struct {
-	ID        uint      `json:"id" gorm:"primaryKey;autoIncrement"`
-	UserID    string    `json:"userId" gorm:"type:varchar(36);not null;index"`
-	HostID    string    `json:"hostId" gorm:"type:varchar(36);not null;index"`
-	CreatedBy string    `json:"createdBy,omitempty" gorm:"type:varchar(36)"`
-	CreatedAt time.Time `json:"createdAt" gorm:"autoCreateTime"`
-	UpdatedAt time.Time `json:"updatedAt" gorm:"autoUpdateTime"`
-}
-
-func (UserHostPermission) TableName() string {
-	return "user_host_permissions"
-}
-
 // UserWithGroups 用户及其关联的分组
 type UserWithGroups struct {
 	User

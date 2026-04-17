@@ -119,7 +119,7 @@ func (h *HostHandler) ListHosts(c *gin.Context) {
 	var err error
 
 	// 管理员查看所有主机
-	// 普通用户只能查看有权限访问的主机（通过user_host_permissions或user_group_permissions授权）
+	// 普通用户只能查看授权规则允许访问的主机
 	if role == "admin" {
 		hosts, total, err = h.service.ListHosts(page, pageSize, search, tags)
 	} else {

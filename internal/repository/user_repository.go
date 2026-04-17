@@ -181,8 +181,8 @@ func (r *UserRepository) UpdateUserStatus(userID, status string) error {
 
 // AssignGroupsToUser 给用户分配分组权限
 func (r *UserRepository) AssignGroupsToUser(userID string, groupIDs []string, createdBy string) error {
-	// 先删除该用户现有的所有权限
-	if err := r.db.Where("user_id = ?", userID).Delete(&model.UserGroupPermission{}).Error; err != nil {
+	// 新架构：用户与用户组关系存储在 user_group_members
+	if err := r.db.Where("user_id = ?", userID).Delete(&model.UserGroupMember{}).Error; err != nil {
 		return err
 	}
 
@@ -191,30 +191,30 @@ func (r *UserRepository) AssignGroupsToUser(userID string, groupIDs []string, cr
 		return nil
 	}
 
-	// 批量插入新权限
-	permissions := make([]model.UserGroupPermission, 0, len(groupIDs))
+	// 批量插入新成员关系
+	members := make([]model.UserGroupMember, 0, len(groupIDs))
 	for _, groupID := range groupIDs {
-		permissions = append(permissions, model.UserGroupPermission{
-			UserID:    userID,
-			GroupID:   groupID,
-			CreatedBy: createdBy,
+		members = append(members, model.UserGroupMember{
+			UserID:      userID,
+			UserGroupID: groupID,
+			AddedBy:     createdBy,
 		})
 	}
 
-	return r.db.Create(&permissions).Error
+	return r.db.Create(&members).Error
 }
 
 // GetUserGroups 获取用户有权限访问的分组ID列表
 func (r *UserRepository) GetUserGroups(userID string) ([]string, error) {
-	var permissions []model.UserGroupPermission
-	err := r.db.Where("user_id = ?", userID).Find(&permissions).Error
+	var members []model.UserGroupMember
+	err := r.db.Where("user_id = ?", userID).Find(&members).Error
 	if err != nil {
 		return nil, err
 	}
 
-	groupIDs := make([]string, 0, len(permissions))
-	for _, p := range permissions {
-		groupIDs = append(groupIDs, p.GroupID)
+	groupIDs := make([]string, 0, len(members))
+	for _, m := range members {
+		groupIDs = append(groupIDs, m.UserGroupID)
 	}
 
 	return groupIDs, nil
@@ -267,26 +267,32 @@ func (r *UserRepository) FindAllUsersWithGroups(page, pageSize int, keyword stri
 
 // RemoveUserFromGroup 从分组中移除用户
 func (r *UserRepository) RemoveUserFromGroup(userID, groupID string) error {
-	return r.db.Where("user_id = ? AND group_id = ?", userID, groupID).
-		Delete(&model.UserGroupPermission{}).Error
+	return r.db.Where("user_id = ? AND user_group_id = ?", userID, groupID).
+		Delete(&model.UserGroupMember{}).Error
 }
 
 // AddUserToGroup 将用户添加到分组
 func (r *UserRepository) AddUserToGroup(userID, groupID, createdBy string) error {
-	permission := model.UserGroupPermission{
-		UserID:    userID,
-		GroupID:   groupID,
-		CreatedBy: createdBy,
+	member := model.UserGroupMember{
+		UserID:      userID,
+		UserGroupID: groupID,
+		AddedBy:     createdBy,
 	}
-	return r.db.Create(&permission).Error
+	return r.db.Create(&member).Error
 }
 
 // GetUsersInGroup 获取有权限访问某个分组的所有用户
 func (r *UserRepository) GetUsersInGroup(groupID string) ([]model.User, error) {
+	// 新架构：
+	// host_group -> permission_rules -> user_group_members -> users
 	var users []model.User
 	err := r.db.
-		Joins("JOIN user_group_permissions ON users.id = user_group_permissions.user_id").
-		Where("user_group_permissions.group_id = ?", groupID).
+		Distinct("users.*").
+		Joins("JOIN user_group_members ugm ON users.id = ugm.user_id").
+		Joins("JOIN permission_rules pr ON pr.user_group_id = ugm.user_group_id").
+		Joins("JOIN permission_rule_host_groups prhg ON pr.id = prhg.permission_rule_id").
+		Where("prhg.host_group_id = ?", groupID).
+		Where("pr.enabled = ?", true).
 		Find(&users).Error
 	return users, err
 }
@@ -295,43 +301,18 @@ func (r *UserRepository) GetUsersInGroup(groupID string) ([]model.User, error) {
 
 // AssignHostsToUser 给用户分配单个主机权限
 func (r *UserRepository) AssignHostsToUser(userID string, hostIDs []string, createdBy string) error {
-	// 先删除该用户现有的所有主机权限
-	if err := r.db.Where("user_id = ?", userID).Delete(&model.UserHostPermission{}).Error; err != nil {
-		return err
-	}
-
-	// 如果没有主机要分配，直接返回
-	if len(hostIDs) == 0 {
-		return nil
-	}
-
-	// 批量插入新权限
-	permissions := make([]model.UserHostPermission, 0, len(hostIDs))
-	for _, hostID := range hostIDs {
-		permissions = append(permissions, model.UserHostPermission{
-			UserID:    userID,
-			HostID:    hostID,
-			CreatedBy: createdBy,
-		})
-	}
-
-	return r.db.Create(&permissions).Error
+	// 旧表 user_host_permissions 已废弃，不再写入。
+	_ = userID
+	_ = hostIDs
+	_ = createdBy
+	return nil
 }
 
 // GetUserHosts 获取用户有权限访问的主机ID列表（单独授权的）
 func (r *UserRepository) GetUserHosts(userID string) ([]string, error) {
-	var permissions []model.UserHostPermission
-	err := r.db.Where("user_id = ?", userID).Find(&permissions).Error
-	if err != nil {
-		return nil, err
-	}
-
-	hostIDs := make([]string, 0, len(permissions))
-	for _, p := range permissions {
-		hostIDs = append(hostIDs, p.HostID)
-	}
-
-	return hostIDs, nil
+	// 旧表 user_host_permissions 已废弃，单主机直授不再使用。
+	_ = userID
+	return []string{}, nil
 }
 
 // GetUserHostGroupIDs 获取用户通过授权规则有权限访问的主机组ID列表
@@ -406,18 +387,17 @@ func (r *UserRepository) GetUserHostGroupIDs(userID string) ([]string, error) {
 
 // AddUserToHost 将用户添加到单个主机权限
 func (r *UserRepository) AddUserToHost(userID, hostID, createdBy string) error {
-	permission := model.UserHostPermission{
-		UserID:    userID,
-		HostID:    hostID,
-		CreatedBy: createdBy,
-	}
-	return r.db.Create(&permission).Error
+	_ = userID
+	_ = hostID
+	_ = createdBy
+	return nil
 }
 
 // RemoveUserFromHost 从主机移除用户权限
 func (r *UserRepository) RemoveUserFromHost(userID, hostID string) error {
-	return r.db.Where("user_id = ? AND host_id = ?", userID, hostID).
-		Delete(&model.UserHostPermission{}).Error
+	_ = userID
+	_ = hostID
+	return nil
 }
 
 // GetUserWithGroupsAndHosts 获取用户及其分组和主机权限信息
