@@ -1,4 +1,4 @@
-import { Host, LoginRecord, DashboardStats, ApiResponse, Protocol, DeviceType } from '../types';
+import { Host, LoginRecord, DashboardStats, ApiResponse, Protocol, DeviceType, FileTransfer } from '../types';
 import axiosInstance, { showSuccessToast, showErrorToast } from './request';
 import config from '../config';
 
@@ -980,6 +980,21 @@ export const fileApi = {
   },
 
   // 从目标服务器下载文件
+  getDownloadUrl: (hostId: string, remotePath: string, systemUserId: string): string => {
+    const params = new URLSearchParams({
+      hostId,
+      remotePath,
+      systemUserId,
+    });
+
+    const token = localStorage.getItem('token');
+    if (token) {
+      params.set('token', token);
+    }
+
+    return `${config.apiUrl}/api/files/download?${params.toString()}`;
+  },
+
   downloadFile: async (hostId: string, remotePath: string, systemUserId: string): Promise<Blob> => {
     try {
       const response = await axiosInstance.get('/api/files/download', {
@@ -1016,7 +1031,7 @@ export const fileApi = {
     if (params?.direction) queryParams.set('direction', params.direction);
 
     const query = queryParams.toString();
-    return request<{ transfers: any[] }>(
+    return request<{ transfers: FileTransfer[] }>(
       `/api/files/transfers${query ? `?${query}` : ''}`
     );
   },

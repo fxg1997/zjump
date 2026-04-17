@@ -47,6 +47,27 @@ export interface LoginRecord {
 }
 
 // 会话记录
+export interface FileTransfer {
+  id: string;
+  session_id: string;
+  user_id: string;
+  username: string;
+  host_id: string;
+  host_ip: string;
+  host_name: string;
+  direction: 'upload' | 'download';
+  local_path: string;
+  remote_path: string;
+  file_name: string;
+  file_size: number;
+  status: 'uploading' | 'downloading' | 'completed' | 'failed';
+  progress: number;
+  error_message?: string;
+  transferred_at: string;
+  completed_at?: string;
+  duration: number;
+}
+
 export interface SessionRecord {
   id: string;
   sessionId: string;

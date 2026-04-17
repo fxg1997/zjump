@@ -9,34 +9,37 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// AuthMiddleware JWT认证中间件
+// AuthMiddleware validates JWT credentials for authenticated API routes.
 func AuthMiddleware(authService *service.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 从Header获取Token
+		// Prefer the Authorization header, but allow query tokens for
+		// browser-triggered downloads where custom headers are not available.
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, model.Error(401, "缺少Authorization Header"))
-			c.Abort()
-			return
+		tokenString := ""
+
+		if authHeader != "" {
+			tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+			if tokenString == authHeader {
+				c.JSON(http.StatusUnauthorized, model.Error(401, "Token format is invalid"))
+				c.Abort()
+				return
+			}
+		} else {
+			tokenString = strings.TrimSpace(c.Query("token"))
+			if tokenString == "" {
+				c.JSON(http.StatusUnauthorized, model.Error(401, "Missing Authorization header or token"))
+				c.Abort()
+				return
+			}
 		}
 
-		// 移除 "Bearer " 前缀
-		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-		if tokenString == authHeader {
-			c.JSON(http.StatusUnauthorized, model.Error(401, "Token格式错误"))
-			c.Abort()
-			return
-		}
-
-		// 验证Token
 		claims, err := authService.ValidateToken(tokenString)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, model.Error(401, "Token无效或已过期"))
+			c.JSON(http.StatusUnauthorized, model.Error(401, "Token is invalid or expired"))
 			c.Abort()
 			return
 		}
 
-		// 将用户信息保存到上下文
 		c.Set("userID", claims.UserID)
 		c.Set("username", claims.Username)
 		c.Set("role", claims.Role)
@@ -45,12 +48,12 @@ func AuthMiddleware(authService *service.AuthService) gin.HandlerFunc {
 	}
 }
 
-// AdminMiddleware 管理员权限中间件
+// AdminMiddleware restricts routes to administrators.
 func AdminMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, exists := c.Get("role")
 		if !exists || role != "admin" {
-			c.JSON(http.StatusForbidden, model.Error(403, "需要管理员权限"))
+			c.JSON(http.StatusForbidden, model.Error(403, "Administrator permissions required"))
 			c.Abort()
 			return
 		}

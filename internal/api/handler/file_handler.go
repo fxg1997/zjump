@@ -302,7 +302,7 @@ func (h *FileHandler) getRemoteFileSize(host *model.Host, systemUser *model.Syst
 	return size, nil
 }
 
-func (h *FileHandler) streamDownloadFile(c *gin.Context, host *model.Host, systemUser *model.SystemUser, remotePath string) error {
+func (h *FileHandler) streamDownloadFile(c *gin.Context, host *model.Host, systemUser *model.SystemUser, remotePath string, fileSize int64, progressCallback func(int)) error {
 	client, err := h.newSSHClient(host, systemUser)
 	if err != nil {
 		return err
@@ -327,8 +327,37 @@ func (h *FileHandler) streamDownloadFile(c *gin.Context, host *model.Host, syste
 		return fmt.Errorf("failed to start remote download command: %w", err)
 	}
 
-	if _, err := io.Copy(c.Writer, stdout); err != nil {
-		return fmt.Errorf("failed to stream download data: %w", err)
+	buffer := make([]byte, 32*1024)
+	var written int64
+	lastProgress := -1
+
+	for {
+		n, readErr := stdout.Read(buffer)
+		if n > 0 {
+			if _, err := c.Writer.Write(buffer[:n]); err != nil {
+				return fmt.Errorf("failed to stream download data: %w", err)
+			}
+
+			if flusher, ok := c.Writer.(http.Flusher); ok {
+				flusher.Flush()
+			}
+
+			written += int64(n)
+			if progressCallback != nil {
+				progress := calculateTransferProgress(written, fileSize)
+				if progress > lastProgress {
+					progressCallback(progress)
+					lastProgress = progress
+				}
+			}
+		}
+
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return fmt.Errorf("failed to stream download data: %w", readErr)
+		}
 	}
 
 	if err := session.Wait(); err != nil {
@@ -337,6 +366,10 @@ func (h *FileHandler) streamDownloadFile(c *gin.Context, host *model.Host, syste
 			return fmt.Errorf("remote download command failed: %w: %s", err, errText)
 		}
 		return fmt.Errorf("remote download command failed: %w", err)
+	}
+
+	if progressCallback != nil && lastProgress < 100 {
+		progressCallback(100)
 	}
 
 	return nil
@@ -412,6 +445,24 @@ func (h *FileHandler) writeResolveError(c *gin.Context, err error) {
 	default:
 		c.JSON(http.StatusInternalServerError, model.Error(500, err.Error()))
 	}
+}
+
+func calculateTransferProgress(transferredBytes, totalBytes int64) int {
+	if totalBytes <= 0 {
+		if transferredBytes > 0 {
+			return 90
+		}
+		return 0
+	}
+
+	progress := int((transferredBytes * 100) / totalBytes)
+	if progress < 0 {
+		return 0
+	}
+	if progress > 100 {
+		return 100
+	}
+	return progress
 }
 
 func buildListFilesCommand(remotePath string) string {
@@ -546,7 +597,6 @@ func (h *FileHandler) GetFileTransfers(c *gin.Context) {
 	})
 }
 
-// DownloadFile is not implemented yet.
 func (h *FileHandler) DownloadFile(c *gin.Context) {
 	hostID := c.Query("hostId")
 	systemUserID := c.Query("systemUserId")
@@ -557,7 +607,7 @@ func (h *FileHandler) DownloadFile(c *gin.Context) {
 		return
 	}
 
-	host, systemUser, _, err := h.resolveAuthorizedTarget(c, hostID, systemUserID)
+	host, systemUser, userID, err := h.resolveAuthorizedTarget(c, hostID, systemUserID)
 	if err != nil {
 		h.writeResolveError(c, err)
 		return
@@ -575,17 +625,68 @@ func (h *FileHandler) DownloadFile(c *gin.Context) {
 		fileName = "download.bin"
 	}
 
+	usernameValue, _ := c.Get("username")
+	username, _ := usernameValue.(string)
+	if username == "" {
+		username = "unknown"
+	}
+
+	transferID := uuid.New().String()
+	startTime := time.Now()
+	transfer := &model.FileTransfer{
+		ID:            transferID,
+		SessionID:     uuid.New().String(),
+		UserID:        userID,
+		Username:      username,
+		HostID:        host.ID,
+		HostIP:        host.IP,
+		HostName:      host.Name,
+		Direction:     "download",
+		LocalPath:     fileName,
+		RemotePath:    cleanPath,
+		FileName:      fileName,
+		FileSize:      fileSize,
+		Status:        "downloading",
+		Progress:      0,
+		TransferredAt: startTime,
+	}
+
+	if err := h.db.Create(transfer).Error; err != nil {
+		log.Printf("[FileHandler] Failed to create download transfer record: %v", err)
+	}
+
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fileName))
 	c.Header("Content-Type", "application/octet-stream")
 	if fileSize >= 0 {
 		c.Header("Content-Length", strconv.FormatInt(fileSize, 10))
 	}
 
-	if err := h.streamDownloadFile(c, host, systemUser, cleanPath); err != nil {
+	if err := h.streamDownloadFile(c, host, systemUser, cleanPath, fileSize, func(progress int) {
+		h.db.Model(&model.FileTransfer{}).Where("id = ?", transferID).Update("progress", progress)
+	}); err != nil {
+		completedAt := time.Now()
+		duration := int(completedAt.Sub(startTime).Seconds())
+		h.db.Model(&model.FileTransfer{}).Where("id = ?", transferID).Updates(map[string]interface{}{
+			"status":        "failed",
+			"error_message": err.Error(),
+			"completed_at":  completedAt,
+			"duration":      duration,
+		})
+
 		if !c.Writer.Written() {
 			c.JSON(http.StatusInternalServerError, model.Error(500, "Failed to download file: "+err.Error()))
 			return
 		}
 		log.Printf("[FileHandler] Download stream interrupted for %s: %v", cleanPath, err)
+		return
 	}
+
+	completedAt := time.Now()
+	duration := int(completedAt.Sub(startTime).Seconds())
+	h.db.Model(&model.FileTransfer{}).Where("id = ?", transferID).Updates(map[string]interface{}{
+		"status":       "completed",
+		"progress":     100,
+		"completed_at": completedAt,
+		"duration":     duration,
+	})
 }
